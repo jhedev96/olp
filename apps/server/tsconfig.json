@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",
+    "noEmitOnError": true,
     "lib": ["ES2022"],
     "types": ["node"]
   },
