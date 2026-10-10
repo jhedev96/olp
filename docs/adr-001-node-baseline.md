@@ -1,7 +1,8 @@
 # ADR-001: Node.js Minimum Version
 
-- Status: Proposed (needs human approval)
+- Status: Accepted
 - Date: 2026-10-10
+- Approved: 2026-10-10 (human)
 - Scope: OLP monorepo (`apps/server`, `apps/web`, `packages/*`, `cli/`)
 - Supersedes: PLAN.md placeholder "candidate Node 20 LTS"
 
@@ -70,4 +71,4 @@ Adopt Option 1: `engines: { "node": ">=22.12" }` across all workspaces. Document
 
 ## Approval
 
-- [ ] Human approves `>=22.12` baseline (then update PLAN.md, PRD success criteria, and all `package.json` engines).
+- [x] Human approves `>=22.12` baseline (then update PLAN.md, PRD success criteria, and all `package.json` engines).
