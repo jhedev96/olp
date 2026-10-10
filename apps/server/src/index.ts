@@ -2,13 +2,14 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { detect } from '@olp/env-core';
 import type { Environment } from '@olp/env-core';
 import type { SysDeps } from '@olp/sysinfo';
 import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
 import { nodeDeps, registerStatsRoutes } from './stats.js';
+import { registerFilesRoutes } from './files.js';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
 export interface ServerHandle {
@@ -52,6 +53,11 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   const auth = createAuthContext(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
+  registerFilesRoutes(app, { root, exec: sysDeps.exec });
+  app.setErrorHandler(async (err: Error, _req: FastifyRequest, reply: FastifyReply) => {
+    reply.code(400);
+    await reply.send({ error: err.message || 'Failed' });
+  });
   return { app, auth, env };
 }
 
