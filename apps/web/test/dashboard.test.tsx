@@ -38,9 +38,22 @@ function stubApi(handler: (url: string) => unknown): { calls: string[] } {
   return { calls };
 }
 
+const STORE = {
+  items: [
+    { id: 'nginx', name: 'nginx', installed: true },
+    { id: 'node', name: 'node', installed: false },
+  ],
+};
+
+function dashboardHandler(url: string): unknown {
+  if (url === '/api/stats') return STATS;
+  if (url === '/api/install') return STORE;
+  return SITES;
+}
+
 describe('web dashboard page', () => {
   it('renders cards and the sites table', async () => {
-    stubApi((url) => (url === '/api/stats' ? STATS : SITES));
+    stubApi(dashboardHandler);
     await act(async () => {
       render(<DashboardPage />);
     });
@@ -101,5 +114,17 @@ describe('web dashboard page', () => {
     });
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.getByText('No websites yet')).not.toBeNull();
+  });
+
+  it('shows the store preview with tracked dummies', async () => {
+    stubApi(dashboardHandler);
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText('2 available')).not.toBeNull();
+    expect(screen.getByText('Installed')).not.toBeNull();
+    expect(screen.getByText('CAND-005')).not.toBeNull();
+    expect(screen.getByText('CAND-013')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Restart panel' })).toHaveProperty('disabled', true);
   });
 });
