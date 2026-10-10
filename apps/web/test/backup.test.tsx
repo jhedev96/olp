@@ -101,4 +101,22 @@ describe('web backup page', () => {
     expect(links).toHaveLength(2);
     expect((links[0] as HTMLAnchorElement).href).toContain('/api/backups/b1/download');
   });
+
+  it('shows stats, engines and the advanced dummy', async () => {
+    stubApi((url) => {
+      if (url === '/api/stats') return { status: 200, json: { disk: { free: 82800000000 } } };
+      if (url === '/api/install') {
+        return { status: 200, json: { items: [{ id: 'zip', installed: true }, { id: 'mysql', installed: false }] } };
+      }
+      return { status: 200, json: BACKUPS };
+    });
+    await act(async () => {
+      render(<BackupPage />);
+    });
+    expect(screen.getByText('2 archives · 2.1 KB')).not.toBeNull();
+    expect(screen.getByText('Directory zip: ready')).not.toBeNull();
+    expect(screen.getByText('MySQL dump: missing')).not.toBeNull();
+    expect(screen.getByText('Postgres snapshot: unknown')).not.toBeNull();
+    expect(screen.getByText('CAND-029')).not.toBeNull();
+  });
 });
