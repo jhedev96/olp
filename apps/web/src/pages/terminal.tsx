@@ -4,6 +4,7 @@ import { Terminal } from 'xterm';
 import type { IDisposable } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { wsUrl } from '../lib/api.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 
 /** Mobile keymap (Terwo `TERM_KEYMAP` parity). */
@@ -83,6 +84,7 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const [hint, setHint] = useState('');
   const [ctrl, setCtrl] = useState(false);
   const [alt, setAlt] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -204,9 +206,11 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   };
 
   const createNew = (): void => {
-    if (!window.confirm('Start a new terminal session? The current session will be killed — including all processes running inside it.')) {
-      return;
-    }
+    setConfirmNew(true);
+  };
+
+  const confirmCreateNew = (): void => {
+    setConfirmNew(false);
     try {
       wsRef.current?.send(JSON.stringify({ t: 'new' }));
     } catch {
@@ -258,6 +262,15 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
           New session
         </Button>
       </div>
+      <ConfirmDialog
+        open={confirmNew}
+        title="New terminal session"
+        message="Start a new terminal session? The current session will be killed — including all processes running inside it."
+        confirmLabel="New session"
+        destructive={true}
+        onConfirm={confirmCreateNew}
+        onCancel={() => setConfirmNew(false)}
+      />
       {hint !== '' && (
         <p role="alert" className="text-sm text-yellow-400">
           {hint}

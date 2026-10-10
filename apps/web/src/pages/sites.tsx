@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -31,7 +32,7 @@ export interface ProxyRow {
  * Websites + Nginx reverse proxies (Terwo website-tab parity): type tabs,
  * add modal, start/stop/restart/log/delete, log modal, nginx service
  * buttons, proxy form + delete. List failures keep the previous render;
- * destructive actions gate on `window.confirm` (dialog primitive later).
+ * destructive actions are dialog-gated (two-step open-confirm).
  */
 export function SitesPage(): ReactElement {
   const [sites, setSites] = useState<SiteRow[]>([]);
@@ -44,6 +45,8 @@ export function SitesPage(): ReactElement {
   const [proxies, setProxies] = useState<ProxyRow[]>([]);
   const [proxyForm, setProxyForm] = useState({ name: '', listen: '', domain: '', target: '' });
   const [proxyError, setProxyError] = useState('');
+  const [pendingSite, setPendingSite] = useState<SiteRow | null>(null);
+  const [pendingProxy, setPendingProxy] = useState<ProxyRow | null>(null);
 
   const loadSites = useCallback(async (): Promise<void> => {
     try {
@@ -79,9 +82,15 @@ export function SitesPage(): ReactElement {
     await loadSites();
   };
 
-  const remove = async (site: SiteRow): Promise<void> => {
-    if (!window.confirm(`Delete website "${site.name}"? This cannot be undone.`)) return;
-    await apiJson(`/api/sites/${site.id}/delete`, { method: 'POST' }).catch(() => undefined);
+  const remove = (site: SiteRow): void => {
+    setPendingSite(site);
+  };
+
+  const confirmRemove = async (): Promise<void> => {
+    if (pendingSite === null) return;
+    const id = pendingSite.id;
+    setPendingSite(null);
+    await apiJson(`/api/sites/${id}/delete`, { method: 'POST' }).catch(() => undefined);
     await loadSites();
   };
 
@@ -149,9 +158,15 @@ export function SitesPage(): ReactElement {
     }
   };
 
-  const removeProxy = async (proxy: ProxyRow): Promise<void> => {
-    if (!window.confirm(`Delete proxy "${proxy.name}"? This cannot be undone.`)) return;
-    await apiJson(`/api/nginx/proxies/${proxy.id}`, { method: 'DELETE' }).catch(() => undefined);
+  const removeProxy = (proxy: ProxyRow): void => {
+    setPendingProxy(proxy);
+  };
+
+  const confirmRemoveProxy = async (): Promise<void> => {
+    if (pendingProxy === null) return;
+    const id = pendingProxy.id;
+    setPendingProxy(null);
+    await apiJson(`/api/nginx/proxies/${id}`, { method: 'DELETE' }).catch(() => undefined);
     await loadNginx();
   };
 
@@ -300,6 +315,24 @@ export function SitesPage(): ReactElement {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingSite !== null}
+        title="Delete website"
+        message={pendingSite === null ? '' : `Delete website "${pendingSite.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive={true}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => setPendingSite(null)}
+      />
+      <ConfirmDialog
+        open={pendingProxy !== null}
+        title="Delete proxy"
+        message={pendingProxy === null ? '' : `Delete proxy "${pendingProxy.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive={true}
+        onConfirm={() => void confirmRemoveProxy()}
+        onCancel={() => setPendingProxy(null)}
+      />
       {logView !== null && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-900 p-4">

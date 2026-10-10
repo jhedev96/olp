@@ -15,6 +15,7 @@ import {
 } from 'lucide';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
+import { ConfirmDialog, PromptDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -60,9 +61,8 @@ function isZip(name: string): boolean {
 
 /**
  * File manager (Terwo files-tab parity): crumbs + up-row, per-type row
- * actions, prompt-based mkdir/touch/rename, confirm-gated delete
- * (`window.confirm` until the dialog primitive lands), base64 upload,
- * in-browser text editor modal, image preview modal.
+ * actions, dialog-driven mkdir/touch/rename, dialog-gated delete,
+ * base64 upload, in-browser text editor modal, image preview modal.
  */
 export function FilesPage(): ReactElement {
   const [dir, setDir] = useState('');
@@ -72,6 +72,9 @@ export function FilesPage(): ReactElement {
   const [editorError, setEditorError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [promptRename, setPromptRename] = useState<string | null>(null);
+  const [promptTouch, setPromptTouch] = useState(false);
 
   const load = useCallback(async (target: string): Promise<void> => {
     setError('');
@@ -114,14 +117,31 @@ export function FilesPage(): ReactElement {
   };
 
   const remove = (name: string): void => {
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setPendingDelete(name);
+  };
+
+  const confirmRemove = (): void => {
+    if (pendingDelete === null) return;
+    const name = pendingDelete;
+    setPendingDelete(null);
     void runAction('/api/delete', { name });
   };
 
   const rename = (name: string): void => {
-    const next = window.prompt('New name:', name);
-    if (next === null || next === '' || next === name) return;
+    setPromptRename(name);
+  };
+
+  const confirmRename = (next: string): void => {
+    if (promptRename === null) return;
+    const name = promptRename;
+    setPromptRename(null);
+    if (next === '' || next === name) return;
     void runAction('/api/rename', { from: name, to: next });
+  };
+
+  const confirmTouch = (name: string): void => {
+    setPromptTouch(false);
+    if (name !== '') void runAction('/api/touch', { name });
   };
 
   const openEditor = async (name: string): Promise<void> => {
@@ -200,8 +220,7 @@ export function FilesPage(): ReactElement {
           size="sm"
           variant="outline"
           onClick={() => {
-            const n = window.prompt('File name:');
-            if (n !== null && n !== '') void runAction('/api/touch', { name: n });
+            setPromptTouch(true);
           }}
         >
           Touch
@@ -348,6 +367,32 @@ export function FilesPage(): ReactElement {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete file"
+        message={pendingDelete === null ? '' : `Delete "${pendingDelete}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive={true}
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingDelete(null)}
+      />
+      <PromptDialog
+        open={promptRename !== null}
+        title="Rename file"
+        initialValue={promptRename ?? ''}
+        placeholder="New name"
+        confirmLabel="Rename"
+        onSubmit={confirmRename}
+        onCancel={() => setPromptRename(null)}
+      />
+      <PromptDialog
+        open={promptTouch}
+        title="New file"
+        placeholder="File name:"
+        confirmLabel="Create"
+        onSubmit={confirmTouch}
+        onCancel={() => setPromptTouch(false)}
+      />
       {preview !== null && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreview(null)}>
           <img

@@ -46,7 +46,7 @@ export function Dialog({
 }
 
 /**
- * Confirm replacement for `window.confirm`: destructive actions keep the
+ * Confirm replacement for the native blocking confirm: destructive actions keep the
  * two-step (caller opens, user confirms). `busy` disables both buttons
  * while the confirmed action runs.
  */
@@ -87,7 +87,7 @@ export function ConfirmDialog({
 }
 
 /**
- * Prompt replacement for `window.prompt`: single text input with submit
+ * Prompt replacement for the native blocking prompt: single text input with submit
  * on Enter. The input resets to `initialValue` on every open so stale
  * edits never leak between invocations.
  */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtSize } from '../lib/format.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -21,13 +22,15 @@ const BACKUP_TYPES = ['folder', 'mysql', 'postgres'] as const;
 
 /**
  * Backups (Terwo backup-tab parity): create form (name/type/source),
- * table with download/restore/delete, confirm-gated destructive actions.
+ * table with download/restore/delete, dialog-gated destructive actions.
  * Restore uses the stored default target (empty body, Terwo parity).
  */
 export function BackupPage(): ReactElement {
   const [backups, setBackups] = useState<BackupRow[]>([]);
   const [form, setForm] = useState({ name: '', type: 'folder', source: '' });
   const [error, setError] = useState('');
+  const [pendingRestore, setPendingRestore] = useState<BackupRow | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<BackupRow | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -59,9 +62,15 @@ export function BackupPage(): ReactElement {
     }
   };
 
-  const restore = async (backup: BackupRow): Promise<void> => {
-    if (!window.confirm(`Restore backup "${backup.name}"? Current files may be overwritten.`)) return;
-    await apiJson(`/api/backups/${encodeURIComponent(backup.name)}/restore`, {
+  const restore = (backup: BackupRow): void => {
+    setPendingRestore(backup);
+  };
+
+  const confirmRestore = async (): Promise<void> => {
+    if (pendingRestore === null) return;
+    const name = pendingRestore.name;
+    setPendingRestore(null);
+    await apiJson(`/api/backups/${encodeURIComponent(name)}/restore`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -69,9 +78,15 @@ export function BackupPage(): ReactElement {
     await load();
   };
 
-  const remove = async (backup: BackupRow): Promise<void> => {
-    if (!window.confirm(`Delete backup "${backup.name}"? This cannot be undone.`)) return;
-    await apiJson(`/api/backups/${encodeURIComponent(backup.name)}`, { method: 'DELETE' }).catch(() => undefined);
+  const remove = (backup: BackupRow): void => {
+    setPendingDelete(backup);
+  };
+
+  const confirmRemove = async (): Promise<void> => {
+    if (pendingDelete === null) return;
+    const name = pendingDelete.name;
+    setPendingDelete(null);
+    await apiJson(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => undefined);
     await load();
   };
 
@@ -140,6 +155,24 @@ export function BackupPage(): ReactElement {
           </tbody>
         </table>
       </Card>
+      <ConfirmDialog
+        open={pendingRestore !== null}
+        title="Restore backup"
+        message={pendingRestore === null ? '' : `Restore backup "${pendingRestore.name}"? Current files may be overwritten.`}
+        confirmLabel="Restore"
+        destructive={true}
+        onConfirm={() => void confirmRestore()}
+        onCancel={() => setPendingRestore(null)}
+      />
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete backup"
+        message={pendingDelete === null ? '' : `Delete backup "${pendingDelete.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive={true}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => setPendingDelete(null)}
+      />
     </main>
   );
 }

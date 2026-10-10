@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { BackupPage } from '../src/pages/backup.js';
 
 afterEach(() => {
@@ -66,20 +66,28 @@ describe('web backup page', () => {
     expect(screen.getByRole('alert').textContent).toBe('Backup name already taken');
   });
 
-  it('restores and deletes with confirms', async () => {
+  it('restores and deletes with dialogs', async () => {
     const { calls } = stubApi(() => ({ status: 200, json: BACKUPS }));
-    (window as unknown as Record<string, unknown>).confirm = () => true;
     await act(async () => {
       render(<BackupPage />);
     });
     await act(async () => {
       fireEvent.click(screen.getAllByText('Restore')[0] as HTMLElement);
     });
+    const restoreDialog = screen.getByRole('dialog');
+    expect(restoreDialog.textContent).toContain('may be overwritten');
+    await act(async () => {
+      fireEvent.click(within(restoreDialog).getByRole('button', { name: 'Restore' }));
+    });
     const restore = calls.find((c) => c.url === '/api/backups/b1/restore');
     expect(restore?.method).toBe('POST');
     expect(restore?.body).toEqual({});
     await act(async () => {
       fireEvent.click(screen.getAllByText('Delete')[0] as HTMLElement);
+    });
+    const delDialog = screen.getByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(delDialog).getByRole('button', { name: 'Delete' }));
     });
     expect(calls.some((c) => c.url === '/api/backups/b1' && c.method === 'DELETE')).toBe(true);
   });
