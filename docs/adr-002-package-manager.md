@@ -1,7 +1,8 @@
 # ADR-002: npm vs pnpm Workspaces
 
-- Status: Proposed (needs human approval)
+- Status: Accepted
 - Date: 2026-10-10
+- Approved: 2026-10-10 (human)
 - Scope: OLP monorepo tooling (`package.json` workspaces vs `pnpm-workspace.yaml`)
 - Depends on: ADR-001 (`>=22.12` baseline)
 
@@ -58,4 +59,4 @@ Adopt Option 1. Scaffold with npm workspaces. Keep the layout pnpm-friendly (one
 
 ## Approval
 
-- [ ] Human approves npm-canonical + pnpm-opt-in (then scaffold Phase 1 with npm workspaces).
+- [x] Human approves npm-canonical + pnpm-opt-in (then scaffold Phase 1 with npm workspaces).
