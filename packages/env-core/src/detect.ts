@@ -44,8 +44,8 @@ export function distroFromOsRelease(id: string, like: string): EnvId {
   if (/(^|\s)(debian|ubuntu|linuxmint|pop|raspbian)($|\s)/.test(tokens)) return 'debian';
   if (/(^|\s)(arch|manjaro|endeavouros)($|\s)/.test(tokens)) return 'arch';
   if (tokens.includes('alpine')) return 'alpine';
-  if (tokens.includes('fedora')) return 'fedora';
   if (/(^|\s)(rhel|centos|rocky|almalinux|ol)($|\s)/.test(tokens)) return 'rhel';
+  if (tokens.includes('fedora')) return 'fedora';
   return 'unknown';
 }
 
