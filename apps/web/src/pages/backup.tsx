@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
-import { fmtSize } from '../lib/format.js';
+import { fmtDate, fmtSize } from '../lib/format.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
+import { Badge } from '../components/common/Badge.js';
+import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -21,9 +23,14 @@ export interface BackupRow {
 const BACKUP_TYPES = ['folder', 'mysql', 'postgres'] as const;
 
 /**
- * Backups (Terwo backup-tab parity): create form (name/type/source),
- * table with download/restore/delete, dialog-gated destructive actions.
- * Restore uses the stored default target (empty body, Terwo parity).
+ * Backups (mockup backup parity): stats header, storage pool, engine
+ * chips, newest-first table with download/restore/delete, dialog-gated
+ * destructive actions. Engine chips resolve via the install catalog
+ * (`mysqldump` ships with mysql, `pg_dump` with postgres — documented
+ * assumption). Honestly omitted (no source, backend frozen): scheduled
+ * snapshots, archive upload, SHA256 verify, full-system bundle, gzip
+ * variant (CAND-029). Restore uses the stored default target (empty
+ * body, Terwo parity).
  */
 export function BackupPage(): ReactElement {
   const [backups, setBackups] = useState<BackupRow[]>([]);
@@ -31,6 +38,8 @@ export function BackupPage(): ReactElement {
   const [error, setError] = useState('');
   const [pendingRestore, setPendingRestore] = useState<BackupRow | null>(null);
   const [pendingDelete, setPendingDelete] = useState<BackupRow | null>(null);
+  const [diskFree, setDiskFree] = useState<number | null>(null);
+  const [engines, setEngines] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -44,6 +53,32 @@ export function BackupPage(): ReactElement {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let alive = true;
+    void apiJson<{ disk?: { free?: unknown } }>('/api/stats', {}, { unauthorized: 'rethrow' })
+      .then((body) => {
+        if (alive && typeof body.disk?.free === 'number') setDiskFree(body.disk.free);
+      })
+      .catch(() => {
+        // storage pool keeps its placeholder
+      });
+    void apiJson<{ items?: Array<{ id?: unknown; installed?: unknown }> }>('/api/install')
+      .then((body) => {
+        if (!alive || !Array.isArray(body.items)) return;
+        const map: Record<string, boolean> = {};
+        for (const item of body.items) {
+          if (typeof item.id === 'string') map[item.id] = item.installed === true;
+        }
+        setEngines(map);
+      })
+      .catch(() => {
+        // engine chips stay unknown rather than guessing
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const save = async (): Promise<void> => {
     setError('');
@@ -90,9 +125,36 @@ export function BackupPage(): ReactElement {
     await load();
   };
 
+  const sorted = [...backups].sort((a, b) => b.created - a.created);
+  const totalSize = backups.reduce((sum, b) => sum + b.size, 0);
+  const newest = sorted[0];
+  const engineReady = (id: string): boolean | null => (id in engines ? (engines[id] as boolean) : null);
+
   return (
     <main className="p-4">
-      <h1 className="mb-4 text-xl font-bold">Backups</h1>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h1 className="mr-auto text-xl font-bold">Backups</h1>
+        <Badge tone="info">
+          {backups.length} archives · {fmtSize(totalSize)}
+        </Badge>
+        <span className="text-xs text-neutral-400">
+          pool <span className="font-mono">backups/</span> · {diskFree === null ? 'free —' : `${fmtSize(diskFree)} free`}
+        </span>
+      </div>
+      <div className="mb-3 flex flex-wrap gap-1.5" aria-label="Backup engines">
+        {[
+          { id: 'zip', label: 'Directory zip' },
+          { id: 'mysql', label: 'MySQL dump' },
+          { id: 'postgres', label: 'Postgres snapshot' },
+        ].map((engine) => {
+          const ready = engineReady(engine.id);
+          return (
+            <Badge key={engine.id} tone={ready === true ? 'success' : ready === false ? 'danger' : 'neutral'}>
+              {engine.label}: {ready === null ? 'unknown' : ready ? 'ready' : 'missing'}
+            </Badge>
+          );
+        })}
+      </div>
       {error !== '' && (
         <p role="alert" className="mb-2 text-sm text-red-400">
           {error}
@@ -125,14 +187,19 @@ export function BackupPage(): ReactElement {
       <Card className="p-0">
         <table className="w-full text-sm">
           <tbody>
-            {backups.length === 0 ? (
+            {sorted.length === 0 ? (
               <tr>
                 <td className="text-neutral-400">No backups yet</td>
               </tr>
             ) : (
-              backups.map((backup) => (
+              sorted.map((backup) => (
                 <tr key={backup.name}>
-                  <td>{backup.name}</td>
+                  <td>
+                    {backup.name}
+                    {newest?.name === backup.name && (
+                      <span className="ml-2 text-[11px] text-emerald-400">latest · {fmtDate(backup.mtime)}</span>
+                    )}
+                  </td>
                   <td className="text-neutral-400">{backup.type}</td>
                   <td className="font-mono text-xs text-neutral-400">{backup.source === '' ? '—' : backup.source}</td>
                   <td className="text-neutral-400">{fmtSize(backup.size)}</td>
@@ -173,6 +240,9 @@ export function BackupPage(): ReactElement {
         onConfirm={() => void confirmRemove()}
         onCancel={() => setPendingDelete(null)}
       />
+      <div className="mt-3">
+        <ComingSoon feature="Scheduled snapshots, upload & verify" candidate="CAND-029" />
+      </div>
     </main>
   );
 }

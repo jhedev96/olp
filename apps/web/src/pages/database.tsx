@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -58,9 +59,13 @@ export function ResultTable({ fields, rows, affected }: DbResult): ReactElement 
 }
 
 /**
- * Database manager (Terwo database-tab parity): engine tabs, config form
- * with test + save-and-connect, disconnect, db/table browser, 50-row
- * preview, ad-hoc SQL runner. List failures keep the previous render.
+ * Database manager (mockup database parity): engine tabs, config form
+ * with test + save-and-connect, live server version, disconnect,
+ * db/table browser, 50-row preview, Ctrl+Enter ad-hoc SQL runner.
+ * Honestly omitted (no source, backend frozen): Redis engine (CAND-024),
+ * create-database (CAND-006), import/export transfer (CAND-025), schema
+ * DDL + sizes (CAND-026), socket/buffer lines. List failures keep the
+ * previous render.
  */
 export function DatabasePage(): ReactElement {
   const [engine, setEngine] = useState<Engine>('mysql');
@@ -71,8 +76,27 @@ export function DatabasePage(): ReactElement {
   const [tables, setTables] = useState<{ db: string; list: string[] } | null>(null);
   const [result, setResult] = useState<DbResult | { error: string } | null>(null);
   const [sql, setSql] = useState('');
+  const [version, setVersion] = useState('');
+
+  /** Best-effort server version via a version query (hidden on failure). */
+  const fetchVersion = useCallback(async (next: Engine): Promise<void> => {
+    try {
+      const body = await apiJson<DbResult>(`/api/db/${next}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: next === 'mysql' ? 'SELECT VERSION()' : 'SELECT version()' }),
+      });
+      const first = body.rows[0];
+      const value = first === undefined ? undefined : Object.values(first)[0];
+      if (typeof value === 'string' && value !== '') setVersion(value);
+      else if (typeof value === 'number') setVersion(String(value));
+    } catch {
+      // version line stays hidden (older servers, restricted users)
+    }
+  }, []);
 
   const loadConfig = useCallback(async (next: Engine): Promise<void> => {
+    setVersion('');
     try {
       const body = await apiJson<{ config: Record<string, unknown>; connected: boolean }>(`/api/db/${next}/config`);
       const cfg = body.config;
@@ -87,6 +111,7 @@ export function DatabasePage(): ReactElement {
       if (body.connected) {
         const list = await apiJson<{ databases: string[] }>(`/api/db/${next}/databases`);
         setDatabases(list.databases);
+        void fetchVersion(next);
       } else {
         setDatabases([]);
       }
@@ -94,7 +119,7 @@ export function DatabasePage(): ReactElement {
     } catch {
       // keep the previous render (Terwo parity)
     }
-  }, []);
+  }, [fetchVersion]);
 
   useEffect(() => {
     void loadConfig(engine);
@@ -134,6 +159,7 @@ export function DatabasePage(): ReactElement {
         setConnected(true);
         setDatabases(Array.isArray(body.databases) ? body.databases : []);
         setTables(null);
+        void fetchVersion(engine);
       } else setMessage(typeof body.error === 'string' ? body.error : 'Connection failed');
     } catch (err) {
       setMessage(err instanceof ApiError ? err.message : 'Connection failed');
@@ -145,6 +171,7 @@ export function DatabasePage(): ReactElement {
     setConnected(false);
     setDatabases([]);
     setTables(null);
+    setVersion('');
   };
 
   const openTables = async (db: string): Promise<void> => {
@@ -190,15 +217,19 @@ export function DatabasePage(): ReactElement {
   return (
     <main className="p-4">
       <h1 className="mb-4 text-xl font-bold">Database</h1>
-      <div className="mb-3 flex gap-1">
+      <div className="mb-3 flex flex-wrap items-center gap-1">
         {(['mysql', 'postgres'] as const).map((e) => (
           <Button key={e} size="sm" variant={engine === e ? 'default' : 'outline'} onClick={() => setEngine(e)}>
             {e === 'mysql' ? 'MySQL' : 'PostgreSQL'}
           </Button>
         ))}
+        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-024)">
+          Redis
+        </Button>
         <span className={connected ? 'ml-2 text-sm text-green-400' : 'ml-2 text-sm text-neutral-400'}>
           {connected ? `Connected (${engine})` : 'Not connected'}
         </span>
+        {connected && version !== '' && <span className="font-mono text-xs text-neutral-400">{version}</span>}
       </div>
       <div className="mb-2 flex flex-wrap gap-2">
         {field('host', 'Host (127.0.0.1)')}
@@ -207,7 +238,7 @@ export function DatabasePage(): ReactElement {
         {field('password', 'Password', 'password')}
         {field('database', 'Database (optional)')}
       </div>
-      <div className="mb-2 flex gap-2">
+      <div className="mb-2 flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => void testConnection()}>
           Test Connection
         </Button>
@@ -216,6 +247,15 @@ export function DatabasePage(): ReactElement {
         </Button>
         <Button size="sm" variant="outline" onClick={() => void disconnect()}>
           Disconnect
+        </Button>
+        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-006)">
+          New Database
+        </Button>
+        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-025)">
+          Import
+        </Button>
+        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-025)">
+          Export
         </Button>
       </div>
       {message !== '' && <p className="mb-3 text-sm text-neutral-300">{message}</p>}
@@ -252,12 +292,16 @@ export function DatabasePage(): ReactElement {
               className="h-24 w-full rounded border border-neutral-700 bg-transparent p-2 font-mono text-sm"
               value={sql}
               onChange={(ev) => setSql(ev.target.value)}
+              onKeyDown={(ev) => {
+                if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') void runQuery();
+              }}
               placeholder="SELECT * FROM users LIMIT 10"
             />
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2">
               <Button size="sm" onClick={() => void runQuery()}>
                 Run
               </Button>
+              <span className="text-xs text-neutral-500">Ctrl+Enter runs</span>
             </div>
           </Card>
         </div>
@@ -274,6 +318,11 @@ export function DatabasePage(): ReactElement {
             <ResultTable fields={result.fields} rows={result.rows} affected={result.affected} />
           )}
         </Card>
+      )}
+      {connected && (
+        <div className="mt-3">
+          <ComingSoon feature="Schema sizes & DDL browser" candidate="CAND-026" />
+        </div>
       )}
     </main>
   );

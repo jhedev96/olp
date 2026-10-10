@@ -84,6 +84,26 @@ describe('web store page', () => {
     expect(screen.queryByText('Install: PHP')).toBeNull();
   });
 
+  it('searches, categorizes and sorts packages', async () => {
+    stubApi(() => ({ status: 200, json: ITEMS }));
+    await act(async () => {
+      render(<StorePage />);
+    });
+    expect(screen.getByText('1 installed / 2 total')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Update repo' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Batch upgrade' })).toHaveProperty('disabled', true);
+    expect(screen.getByText('CAND-027')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Search packages'), { target: { value: 'ngin' } });
+    expect(screen.queryByText('PHP')).toBeNull();
+    expect(screen.getByText('Nginx')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Search packages'), { target: { value: '' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Runtimes & Langs' }));
+    });
+    expect(screen.queryByText('Nginx')).toBeNull();
+    expect(screen.getByText('PHP')).not.toBeNull();
+  });
+
   it('closes the modal and stops polling', async () => {
     vi.useFakeTimers();
     try {
