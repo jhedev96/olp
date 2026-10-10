@@ -1,5 +1,6 @@
 # Legacy reference (separate repo, frozen) - not tracked in OLP repo
 terwo/
+mockup/
 # Future monorepo ignores
 node_modules/
 dist/
