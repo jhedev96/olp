@@ -70,7 +70,28 @@
 9.4. Verify twice: (a) automated — tests assert exact paths, shapes, limits, and flags from the parity mapping; (b) behavioral — manual smoke where feasible, reported as PASS/FAIL. Injected-test green alone never counts as parity verified (see ADR-003).
 9.5. When a test fails, check the Terwo source first: the bug is as likely in the new test's expectation as in the implementation. Fix the wrong side; never weaken an assertion to reach green without recording why.
 
-## 10. Change Process for These Rules
+## 10. Mockup Parity & Dummy Backlog (frontend redesign)
+
+10.1. The Stitch mockups under `mockup/` are the source of truth for UI.
+Convert them screen by screen; the mockup wins over taste unless the human
+says otherwise. Cite `mockup/<screen>/code.html` like Terwo evidence (§9.1).
+10.2. No-drop policy: every mockup feature lands in the inventory matrix
+(`INVENTORY_WEB.md`) as `real` (backend ready → wire it), `dummy`
+(Coming-Soon badge + disabled, no backend yet), or `new-backend`
+(recorded as a next-wave candidate, built as dummy now).
+10.3. Rebrand lock: converted UI says OpenLocalPanel (no Terwo strings,
+no hotlinked brand assets — self-host the logo).
+10.4. Icon mapping: Lucide stays (no new icon dep); record the
+Material-Symbols → Lucide name map in the redesign spec.
+10.5. Dummy-to-candidate pipeline: every `dummy`/`new-backend` item MUST
+be recorded in `CANDIDATES.md` (id, source screen, backend needed) and
+scheduled with plan + task + spec stubs when its wave comes. A dummy
+without a candidate id is an incomplete task.
+10.6. Backend stays frozen during redesign waves unless the human
+explicitly opens it; `new-backend` candidates never sneak into the
+current wave's scope.
+
+## 11. Change Process for These Rules
 
 - Propose additions as: rule text (English) + rationale + example. They take effect once the user approves and this file is committed.
 - Candidate future rules (not yet active): coverage threshold, performance budgets per route, ADR requirement for new dependencies.
