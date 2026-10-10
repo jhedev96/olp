@@ -6,6 +6,7 @@ import type { Slug } from './lib/router.js';
 import { getTheme, setTheme } from './lib/theme.js';
 import { DashboardPage } from './pages/dashboard.js';
 import { DatabasePage } from './pages/database.js';
+import { CronPage } from './pages/cron.js';
 import { FilesPage } from './pages/files.js';
 import { LoginPage } from './pages/login.js';
 import { SitesPage } from './pages/sites.js';
@@ -13,11 +14,11 @@ import { StorePage } from './pages/store.js';
 import { TerminalPage } from './pages/terminal.js';
 import './styles/index.css';
 
-const REACT_PAGES = { login: LoginPage, dashboard: DashboardPage, files: FilesPage, terminal: TerminalPage, website: SitesPage, database: DatabasePage, store: StorePage } as const;
+const REACT_PAGES = { login: LoginPage, dashboard: DashboardPage, files: FilesPage, terminal: TerminalPage, website: SitesPage, database: DatabasePage, store: StorePage, cron: CronPage } as const;
 type ReactSlug = keyof typeof REACT_PAGES;
 
 function isReactSlug(slug: Slug): slug is ReactSlug {
-  return slug === 'login' || slug === 'dashboard' || slug === 'files' || slug === 'terminal' || slug === 'website' || slug === 'database' || slug === 'store';
+  return slug === 'login' || slug === 'dashboard' || slug === 'files' || slug === 'terminal' || slug === 'website' || slug === 'database' || slug === 'store' || slug === 'cron';
 }
 
 /**
