@@ -104,4 +104,25 @@ describe('web cron page', () => {
     });
     expect(calls.some((c) => c.url === '/api/cron/service')).toBe(true);
   });
+
+  it('searches, filters and previews the crontab', async () => {
+    stubApi((url) => base(url));
+    await act(async () => {
+      render(<CronPage />);
+    });
+    expect(screen.getByText('CAND-028')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Dry-run all' })).toHaveProperty('disabled', true);
+    fireEvent.change(screen.getByLabelText('Search jobs'), { target: { value: 'zzz' } });
+    expect(screen.getByText('No matches')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Search jobs'), { target: { value: '' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('View crontab'));
+    });
+    expect(screen.getByText('Crontab (read-only)')).not.toBeNull();
+    expect(screen.getByText(/0 2 \* \* \* \/bin\/sync/)).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Close'));
+    });
+    expect(screen.queryByText('Crontab (read-only)')).toBeNull();
+  });
 });

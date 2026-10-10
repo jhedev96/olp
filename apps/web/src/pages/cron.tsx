@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
+import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -26,9 +27,22 @@ const PRESETS: Array<{ value: string; label: string }> = [
 ];
 
 /**
- * Cron scheduler (Terwo cron-tab parity): daemon status + start/stop,
- * preset-driven add form, jobs table with enable/disable + dialog-gated
- * delete. List failures keep the previous render.
+ * Render loaded jobs as crontab text (the server backend is real
+ * `crontab(1)`; this is the same data in file format, read-only).
+ */
+export function crontabText(jobs: CronJobRow[]): string {
+  return jobs.map((j) => `# ${j.name}${j.enabled ? '' : ' (disabled)'}\n${j.schedule} ${j.command}`).join('\n');
+}
+
+/**
+ * Cron scheduler (mockup cron parity): daemon status + start/stop,
+ * preset-driven add form, search + status filter, jobs table with
+ * enable/disable + dialog-gated delete, read-only crontab preview.
+ * Honestly omitted (no source, backend frozen): daemon PID, dry-run
+ * all, next-run countdown, dispatch stats (CAND-028); spool paths vary
+ * per OS with no endpoint. Job rows carry no category field, so search
+ * covers filtering (no invented taxonomy). List failures keep the
+ * previous render.
  */
 export function CronPage(): ReactElement {
   const [running, setRunning] = useState<boolean | null>(null);
@@ -37,6 +51,9 @@ export function CronPage(): ReactElement {
   const [form, setForm] = useState({ name: '', schedule: '', command: '' });
   const [error, setError] = useState('');
   const [pendingJob, setPendingJob] = useState<CronJobRow | null>(null);
+  const [query, setQuery] = useState('');
+  const [enabledFilter, setEnabledFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [showCrontab, setShowCrontab] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -104,9 +121,27 @@ export function CronPage(): ReactElement {
     await load();
   };
 
+  const q = query.trim().toLowerCase();
+  const visible = jobs.filter(
+    (job) =>
+      (enabledFilter === 'all' || (enabledFilter === 'enabled') === job.enabled) &&
+      (q === '' || job.name.toLowerCase().includes(q) || job.schedule.includes(q) || job.command.toLowerCase().includes(q)),
+  );
+
   return (
     <main className="p-4">
-      <h1 className="mb-4 text-xl font-bold">Cron</h1>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h1 className="mr-auto text-xl font-bold">Cron</h1>
+        <span className="text-xs text-neutral-400">
+          {jobs.filter((j) => j.enabled).length} active · {jobs.filter((j) => !j.enabled).length} paused
+        </span>
+        <Button size="sm" variant="outline" onClick={() => setShowCrontab(true)}>
+          View crontab
+        </Button>
+        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-028)">
+          Dry-run all
+        </Button>
+      </div>
       <div className="mb-3 flex items-center gap-2 text-sm">
         <span className={running === true ? 'text-green-400' : 'text-neutral-400'}>
           {running === null ? '…' : running ? 'crond running' : 'crond stopped'}
@@ -149,16 +184,34 @@ export function CronPage(): ReactElement {
         <Button size="sm" onClick={() => void save()}>
           Add job
         </Button>
+        <span className="flex-1" />
+        <Input
+          placeholder="Search jobs…"
+          aria-label="Search jobs"
+          value={query}
+          onChange={(ev) => setQuery(ev.target.value)}
+          className="w-44"
+        />
+        <select
+          aria-label="Filter job status"
+          className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+          value={enabledFilter}
+          onChange={(ev) => setEnabledFilter(ev.target.value as 'all' | 'enabled' | 'disabled')}
+        >
+          <option value="all">All</option>
+          <option value="enabled">Enabled only</option>
+          <option value="disabled">Disabled only</option>
+        </select>
       </div>
       <Card className="p-0">
         <table className="w-full text-sm">
           <tbody>
-            {jobs.length === 0 ? (
+            {visible.length === 0 ? (
               <tr>
-                <td className="text-neutral-400">No jobs yet</td>
+                <td className="text-neutral-400">{jobs.length === 0 ? 'No jobs yet' : 'No matches'}</td>
               </tr>
             ) : (
-              jobs.map((job) => (
+              visible.map((job) => (
                 <tr key={job.id}>
                   <td>{job.name}</td>
                   <td className="font-mono text-xs text-neutral-400">{job.schedule}</td>
@@ -193,6 +246,22 @@ export function CronPage(): ReactElement {
         onConfirm={() => void confirmRemove()}
         onCancel={() => setPendingJob(null)}
       />
+      <div className="mt-3">
+        <ComingSoon feature="Dispatch stats & history" candidate="CAND-028" />
+      </div>
+      {showCrontab && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+            <h2 className="mb-2 font-bold">Crontab (read-only)</h2>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs">{crontabText(jobs)}</pre>
+            <div className="mt-2">
+              <Button size="sm" variant="outline" onClick={() => setShowCrontab(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
