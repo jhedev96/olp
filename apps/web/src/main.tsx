@@ -7,13 +7,14 @@ import { getTheme, setTheme } from './lib/theme.js';
 import { DashboardPage } from './pages/dashboard.js';
 import { FilesPage } from './pages/files.js';
 import { LoginPage } from './pages/login.js';
+import { TerminalPage } from './pages/terminal.js';
 import './styles/index.css';
 
-const REACT_PAGES = { login: LoginPage, dashboard: DashboardPage, files: FilesPage } as const;
+const REACT_PAGES = { login: LoginPage, dashboard: DashboardPage, files: FilesPage, terminal: TerminalPage } as const;
 type ReactSlug = keyof typeof REACT_PAGES;
 
 function isReactSlug(slug: Slug): slug is ReactSlug {
-  return slug === 'login' || slug === 'dashboard' || slug === 'files';
+  return slug === 'login' || slug === 'dashboard' || slug === 'files' || slug === 'terminal';
 }
 
 /**
@@ -45,7 +46,7 @@ function render(): void {
   }
   unmountReact();
   const pretty = slug.charAt(0).toUpperCase() + slug.slice(1);
-  const links = (['login', 'dashboard', 'files', 'website', 'database', 'cron', 'backup', 'settings', 'terminal', 'store'] as const)
+  const links = (['login', 'dashboard', 'files', 'terminal', 'website', 'database', 'cron', 'backup', 'settings', 'store'] as const)
     .map((s) => `<a href="/${s}">${s}</a>`)
     .join(' | ');
   root.innerHTML = `<nav>${links}</nav><main><h1>${pretty}</h1><p>OLP — ${slug} page coming soon.</p></main>`;
