@@ -14,7 +14,8 @@ export type Slug =
   | 'backup'
   | 'settings'
   | 'terminal'
-  | 'store';
+  | 'store'
+  | 'monitor';
 
 const SLUGS: readonly Slug[] = [
   'login',
@@ -27,6 +28,7 @@ const SLUGS: readonly Slug[] = [
   'settings',
   'terminal',
   'store',
+  'monitor',
 ];
 
 /** Minimal history surface (real `window.history` in production). */
@@ -49,4 +51,14 @@ export function slugFromPath(path: string): Slug {
  */
 export function navigate(slug: Slug, history: HistoryLike = window.history): void {
   history.pushState({ slug }, '', `/${slug}`);
+}
+
+/**
+ * SPA navigation: push the slug and re-render through the `popstate`
+ * listener in `main.tsx` (no reload — the server fallback would also
+ * resolve the slug on a hard load, this just skips the round trip).
+ */
+export function navigateTo(slug: Slug): void {
+  navigate(slug);
+  window.dispatchEvent(new Event('popstate'));
 }
