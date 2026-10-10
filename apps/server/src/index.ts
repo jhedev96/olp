@@ -18,6 +18,8 @@ import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
 import type { ProxyStore, ProxySystem } from './proxy.js';
 import { fileRegistry, mysqlDriver, pgDriver, registerDatabaseRoutes } from './database.js';
 import type { DbDriver, DbEngine, DbRegistry } from './database.js';
+import { nodeCronBackend, registerCronRoutes } from './cron.js';
+import type { CronBackend } from './cron.js';
 import { realSpawnShell, registerStoreRoutes } from './store.js';
 import type { SpawnShell } from './store.js';
 import { sessionTokenFromHeader } from '@olp/auth';
@@ -44,6 +46,7 @@ export interface ServerOptions {
   proxySys?: ProxySystem;
   dbRegistry?: DbRegistry;
   dbDrivers?: Record<DbEngine, DbDriver>;
+  cronBackend?: CronBackend;
   storeCheck?: (cmd: string) => Promise<boolean>;
   storeSpawn?: SpawnShell;
   storeNotify?: (text: string) => void;
@@ -92,6 +95,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     registry: opts.dbRegistry ?? fileRegistry(auth.dataDir),
     drivers: opts.dbDrivers ?? { mysql: mysqlDriver(), postgres: pgDriver() },
   });
+  registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend() });
   registerStoreRoutes(app, {
     env: env.id,
     home: homedir(),
