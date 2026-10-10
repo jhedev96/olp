@@ -10,7 +10,7 @@ All scripts must pass `bash -n` (CI gate).
 ## Termux (Android, pm2)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/termux.sh | bash
+curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/termux.sh | bash
 ```
 
 Auto-start on reboot: install the Termux:Boot app, create
@@ -20,7 +20,7 @@ Auto-start on reboot: install the Termux:Boot app, create
 ## Debian / Ubuntu (systemd, needs root)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/debian.sh | bash
+curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/debian.sh | bash
 ```
 
 Node.js 22 comes from NodeSource (distro packages are too old — see
@@ -29,7 +29,7 @@ ADR-001). Manage via `systemctl {status,restart} olp`.
 ## Arch Linux (systemd, needs root)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/arch.sh | bash
+curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/arch.sh | bash
 ```
 
 Rolling Node.js tracks current — always above the floor.
@@ -37,7 +37,7 @@ Rolling Node.js tracks current — always above the floor.
 ## Alpine Linux (OpenRC, needs root)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/alpine.sh | sh
+curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/alpine.sh | sh
 ```
 
 musl note: the terminal runs in pipe mode (no `node-pty` build).
@@ -45,7 +45,7 @@ musl note: the terminal runs in pipe mode (no `node-pty` build).
 ## Fedora / RHEL (systemd + firewalld, needs root)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/fedora.sh | bash
+curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/fedora.sh | bash
 ```
 
 Open port 8080 with `firewall-cmd` (printed by the installer), and check
@@ -54,7 +54,7 @@ SELinux audit logs on denials.
 ## macOS (launchd + Homebrew, best-effort in v2.0)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/macos.sh | bash
+curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/macos.sh | bash
 ```
 
 Requires Homebrew up front (the script refuses without it).

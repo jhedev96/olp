@@ -3,7 +3,7 @@
 # OpenLocalPanel — Debian/Ubuntu installer (systemd + NodeSource)
 #
 # Usage (as root, or a user that can write /etc + install packages):
-#   curl -sL https://raw.githubusercontent.com/openlocalpanel/olp/main/installers/debian.sh | bash
+#   curl -sL https://raw.githubusercontent.com/jhedev96/olp/main/installers/debian.sh | bash
 #
 # Reachable across the LAN (0.0.0.0); only use it on trusted networks
 # with a strong password.
@@ -11,7 +11,7 @@
 # ============================================================
 set -e
 
-REPO_URL="${OLP_REPO_URL:-https://github.com/openlocalpanel/olp.git}"
+REPO_URL="${OLP_REPO_URL:-https://github.com/jhedev96/olp.git}"
 TARGET_DIR="${OLP_DIR:-/opt/olp}"
 APP_NAME="olp"
 
