@@ -11,8 +11,13 @@
     "npm": ">=10"
   },
   "scripts": {
-    "build": "echo 'env-core: no build yet (Phase 2)'",
-    "test": "echo 'env-core: no tests yet (Phase 2)'",
-    "lint": "echo 'env-core: no lint yet (Phase 1)'"
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "echo '@olp/env-core: no lint yet'"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
   }
 }
