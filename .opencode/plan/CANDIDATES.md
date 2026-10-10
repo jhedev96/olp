@@ -26,6 +26,13 @@
 | CAND-017 | Terminal workspaces (multi-tab sessions, split panes, per-tab TTY) | NEW: multi-session manager + tab metadata (TTY, proc names) | From P0c terminal read; singleton manager today |
 | CAND-018 | WS latency indicator | EXTEND: ping/pong in WS protocol | From P0c terminal read (0.4ms badge); tiny protocol addition |
 | CAND-019 | Storage mounts/shortcuts card | NEW: root-path + Termux storage probe endpoint (or static per-env map) | From P0c files read; fold Termux symlink health here |
+| CAND-020 | Per-site auto-restart toggle | NEW: autorestart flag on sites + supervisor respawn | From P0d websites read (toggle per app card) |
+| CAND-021 | Nginx vhost advanced (SSL states, per-vhost toggles, conf edit, master stats) | NEW: nginx conf parse/manage endpoints | From P0d proxy read; CRUD stays real, this is the advanced layer |
+| CAND-022 | Port availability indicator in deploy modal | NEW: tiny port-probe endpoint (or attempt-bind) | From P0d add-modal read |
+| CAND-023 | Custom startup command per site | NEW: command field + runner (breaks fixed per-type runners) | From P0d add-modal read; design carefully (jail implications) |
+| CAND-024 | Redis engine + browser | NEW: full Redis driver (INFO/KEYS/GET) + UI engine tab | From P0d database read (engine card exists in mockup) |
+| CAND-025 | SQL import/export file transfer | NEW: dump/restore-via-upload endpoints (or backup-module reuse) | From P0d database read (Import/Export buttons) |
+| CAND-026 | Schema DDL view + table sizes/row counts + data-vs-index panel | NEW: information_schema endpoints (or composed ad-hoc SQL — decide in wave) | From P0d database read |
 
 Rules: add rows only from inventory verdicts (no drive-by ideas without
 a mockup source); when scheduling, write the full spec first (rules §1).
