@@ -103,6 +103,34 @@ describe('web database page', () => {
     expect(screen.getByText('1 rows affected')).not.toBeNull();
   });
 
+  it('shows the live version and runs on Ctrl+Enter', async () => {
+    stubApi((url) => baseHandler(url));
+    await act(async () => {
+      render(<DatabasePage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save & Connect'));
+    });
+    expect(await screen.findByText('2')).not.toBeNull();
+    const area = screen.getByPlaceholderText('SELECT * FROM users LIMIT 10') as HTMLTextAreaElement;
+    fireEvent.change(area, { target: { value: 'SELECT 1' } });
+    await act(async () => {
+      fireEvent.keyDown(area, { key: 'Enter', ctrlKey: true });
+    });
+    expect(screen.getByText('1 rows affected')).not.toBeNull();
+  });
+
+  it('parks unfinished engines and transfers as disabled', async () => {
+    stubApi((url) => baseHandler(url));
+    await act(async () => {
+      render(<DatabasePage />);
+    });
+    expect(screen.getByRole('button', { name: 'Redis' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'New Database' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Import' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Export' })).toHaveProperty('disabled', true);
+  });
+
   it('switches engines and reloads config', async () => {
     const { calls } = stubApi((url, _method, _body) => {
       if (url.includes('/postgres/config')) {
