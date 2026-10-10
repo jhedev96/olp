@@ -38,6 +38,7 @@
 | CAND-029 | Backup advanced (scheduled snapshots, upload import, SHA256 verify, full-system bundle, gzip variant) | NEW: scheduler integration + upload/restore + hash endpoints | From P0e backup read |
 | CAND-030 | Active device sessions table + per-session revoke | NEW: session metadata tracking (UA/IP/last-seen) + revoke endpoint | From P0e settings read; privacy design (what to store) required |
 | CAND-031 | Server config management (bind controls, telegram verified badge, remember-me 30d, rehash flag) + PBKDF2 display decision | MIXED: verified-badge needs getMe proxy (small NEW); bind controls need restart-capable config (design); remember-me needs TTL option; rehash flag + 310k text need HUMAN DROP DECISION (no cryptographic effect, contradicts 120k truth) | From P0e settings+login read; user decision pending on the drop |
+| CAND-032 | Alternative auth methods (hardware passkey, biometric, local pipe) | NEW: full auth-method wave (WebAuthn ceremony or pipe handshake + UI) | From P3 login build; buttons ship disabled with this id |
 
 Rules: add rows only from inventory verdicts (no drive-by ideas without
 a mockup source); when scheduling, write the full spec first (rules §1).
