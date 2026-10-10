@@ -1,10 +1,10 @@
-import { exec } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { Environment } from '@olp/env-core';
 import { getSystemInfo } from '@olp/sysinfo';
 import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
+import { defaultExec } from './exec.js';
 
 /**
  * Build production host dependencies from node builtins.
@@ -18,13 +18,7 @@ export function nodeDeps(): SysDeps {
     freemem: () => os.freemem(),
     hostname: () => os.hostname(),
     uptime: () => os.uptime(),
-    exec: (cmd, timeoutMs) =>
-      new Promise<string>((resolve, reject) => {
-        exec(cmd, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout) => {
-          if (err !== null) reject(err);
-          else resolve(stdout);
-        });
-      }),
+    exec: defaultExec,
     readDir: (dir) => fs.readdirSync(dir),
     readFile: (file) => {
       try {
