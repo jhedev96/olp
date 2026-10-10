@@ -65,7 +65,7 @@ export function registerDatabaseRoutes(app: FastifyInstance, opts: DatabaseOptio
 - Registry persists to `db.json` (mode `0600`) on config-save and connect.
 - Live map holds at most one connection per engine; `connect` closes the previous first; `disconnect` closes + removes (double-disconnect still `{ok:true}`).
 - MySQL identifiers use driver `?`/`??` placeholders; pg identifiers use `"`-doubling (`quotePgIdent`); **values from URL/query params never interpolate raw** — only через placeholders or quoted idents.
-- pg `tables`/`rows` open a short-lived client to the target database and close it in `finally` (pg has no `USE`; Terwo `withPgDb` parity). MySQL reuses the live connection (`SELECT * FROM ??.?? LIMIT 50`).
+- pg `tables`/`rows` open a short-lived client to the target database and close it in `finally` (pg has no `USE`; Terwo `withPgDb` parity). MySQL `tables`/`preview` likewise use short-lived connections; the live connection is only a gate (must exist) plus the channel for `databases` and ad-hoc `query`.
 - `safeCell`: `Buffer` → utf8 string, `Date` → ISO string, else passthrough ( Terwo `safeRow` parity, per cell).
 - Missing driver modules (`mysql2`/`pg` not installed): every endpoint for that engine answers 500 `{error:'Database module not installed. Run: npm install'}` (Terwo `dbLib` parity — message kept verbatim, it matches the monorepo install).
 - Errors other than `test` propagate to the app handler (400 `{error}`); `connect` prefixes `Connection failed: ` (Terwo parity).

@@ -16,6 +16,8 @@ import { fileSiteStore, realSpawner, registerSitesRoutes } from './sites.js';
 import type { SiteSpawner, SiteStore } from './sites.js';
 import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
 import type { ProxyStore, ProxySystem } from './proxy.js';
+import { fileRegistry, mysqlDriver, pgDriver, registerDatabaseRoutes } from './database.js';
+import type { DbDriver, DbEngine, DbRegistry } from './database.js';
 import { sessionTokenFromHeader } from '@olp/auth';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
@@ -38,6 +40,8 @@ export interface ServerOptions {
   siteSpawner?: SiteSpawner;
   proxyStore?: ProxyStore;
   proxySys?: ProxySystem;
+  dbRegistry?: DbRegistry;
+  dbDrivers?: Record<DbEngine, DbDriver>;
 }
 
 /**
@@ -78,6 +82,10 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     prefix: env.prefix,
     store: opts.proxyStore ?? fileProxyStore(auth.dataDir),
     sys: opts.proxySys ?? nodeProxySys(),
+  });
+  registerDatabaseRoutes(app, {
+    registry: opts.dbRegistry ?? fileRegistry(auth.dataDir),
+    drivers: opts.dbDrivers ?? { mysql: mysqlDriver(), postgres: pgDriver() },
   });
   const terminal = new TerminalManager({
     shell: process.env['SHELL'] ?? env.shell ?? 'sh',
