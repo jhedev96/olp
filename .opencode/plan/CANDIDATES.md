@@ -16,7 +16,7 @@
 | CAND-007 | ~~Backup extras beyond CRUD~~ | SUPERSEDED by P0e row detail + CAND-029 (closed 2026-10-10) | Catch-all emptied, do not reopen |
 | CAND-008 | ~~Unresolved P0 leftovers~~ | SUPERSEDED — P0 closed 2026-10-10 with zero TBD rows | Catch-all emptied, do not reopen |
 | CAND-009 | Lucide icon pass (replace emoji) | none (frontend-only) | Opportunistic per page; files page partially done |
-| CAND-010 | `confirm()`/`prompt()` → Dialog | none (frontend-only, approved) | P2 shared Dialog unblocks all call sites |
+| CAND-010 | ~~`confirm()`/`prompt()` → Dialog~~ | none (frontend-only) | CLOSED 2026-10-10: shared `Dialog` + all 10 call sites migrated (6 pages) |
 | CAND-011 | Header avatar / user profiles | NEW or dummy-forever (single-admin has no profiles) | From P0a shell read; likely permanent dummy |
 | CAND-012 | Self-hosted Geist + JetBrains Mono | none (asset weight decision) | System stack ships v1; revisit with size budget |
 | CAND-013 | Dashboard: live panel log tail (+copy/clear) | NEW: panel log tail endpoint (pm2/journald backends) | From P0b; pairs with watchdog-adjacent work, separate spec |
