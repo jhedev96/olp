@@ -1,0 +1,18 @@
+{
+  "name": "@olp/env-core",
+  "version": "2.0.0-alpha.0",
+  "private": true,
+  "description": "Environment detection and capabilities for OpenLocalPanel",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=22.12",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "build": "echo 'env-core: no build yet (Phase 2)'",
+    "test": "echo 'env-core: no tests yet (Phase 2)'",
+    "lint": "echo 'env-core: no lint yet (Phase 1)'"
+  }
+}

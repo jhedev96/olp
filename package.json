@@ -1,0 +1,22 @@
+{
+  "name": "openlocalpanel",
+  "version": "2.0.0-alpha.0",
+  "private": true,
+  "description": "OpenLocalPanel (OLP) — multi-environment local operations panel",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.12",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "cli"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  }
+}
