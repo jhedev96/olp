@@ -17,6 +17,8 @@
 | CAND-008 | Settings/others: extras found in P0 | TBD in P0 inventory | Catch-all, must be emptied or itemized by P0 end |
 | CAND-009 | Lucide icon pass (replace emoji) | none (frontend-only) | Opportunistic per page; files page partially done |
 | CAND-010 | `confirm()`/`prompt()` → Dialog | none (frontend-only, approved) | P2 shared Dialog unblocks all call sites |
+| CAND-011 | Header avatar / user profiles | NEW or dummy-forever (single-admin has no profiles) | From P0a shell read; likely permanent dummy |
+| CAND-012 | Self-hosted Geist + JetBrains Mono | none (asset weight decision) | System stack ships v1; revisit with size budget |
 
 Rules: add rows only from inventory verdicts (no drive-by ideas without
 a mockup source); when scheduling, write the full spec first (rules §1).

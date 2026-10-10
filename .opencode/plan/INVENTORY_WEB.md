@@ -6,17 +6,31 @@
 > Verdicts: `real` (backend ready) | `dummy` (+CANDIDATE id) |
 > `new-backend` (+CANDIDATE id, built as dummy now).
 
-## Shell (verified, all desktop screens)
+## Shell (P0a resolved 2026-10-10 from `terwo_dashboard_revisi/code.html`)
 
-| Element | Mockup evidence | Target component | Verdict |
-|---|---|---|---|
-| Sidebar nav (Dashboard, Website, Database, Files, Terminal, Store, Cron, Backup, Settings) | nav labels in every desktop `code.html` | `components/shell/Sidebar.tsx` | real (router exists) |
-| Monitor nav entry | monitor screens exist; no slug yet | Sidebar + new `/monitor` route | real (new slug, locked) |
-| Brand block (name, version, env badge, host) | `Terwo/v1.13.0/Termux Online/:8080/HOST` markers | `BrandBlock.tsx` | real (rebrand to OLP in P0) |
-| Dark toggle + logout | `dark_mode`, `logout` markers | Sidebar | real (theme + logout exist) |
-| Header (title, host badge) | per-screen headers | `components/shell/Header.tsx` | real (P0 details) |
-| Material → Lucide map | icon names per screen | recorded per row below | real (no new dep) |
-| Self-hosted logo | `terwo_logo/` + lh3 hotlinks (must go) | `assets/logo.*` | real (rebrand asset) |
+Sidebar (fixed `w-64`, dark surface):
+| Element | Mockup exact | OLP target |
+|---|---|---|
+| Brand row | logo img + `Terwo` + badge `v2.4` | `BrandBlock`: self-hosted SVG (glyph kept, wordmark → `olp`, badge → package version), no hotlink |
+| Env pill | pulsing dot + `Termux Online` + mono `:8080` | dynamic: env label from `env-core` + port from config (real) |
+| Nav (order!) | dashboard, website, database, files, terminal, store, cron, backup, settings (+ **monitor** appended — locked decision, absent in mockup) | `Sidebar` with `data-path` parity + active highlight |
+| Nav icons (Material→Lucide) | grid_view, language, database, folder, terminal, storefront, schedule, cloud_sync, tune, [monitor→activity] | layout-dashboard, globe, database, folder, terminal, store, calendar-clock, archive, settings, activity |
+| Bottom row | theme toggle (dark_mode), Quick Terminal (code → terminal), Logout (→ login) | real (theme/logout exist; quick-terminal navigates) |
+| Mobile | bottom tab bar (`fixed bottom-0`, safe-area): dashboard, database, files, websites + overflow TBD | responsive: bottom bar ≤md, rail hidden; overflow pattern verified in P1 |
+
+Header (fixed, backdrop-blur):
+| Element | Mockup exact | OLP target |
+|---|---|---|
+| HOST pill | dns icon + `HOST:` + hostname (`termux-node`) | real (`/api/stats` hostname) |
+| IP pill (sm+) | router icon + `IP:` + `addr:port` | real (location.host — no new endpoint needed) |
+| Quick Terminal button | → terminal | real (navigate) |
+| Active Session pill | green dot + text | real (session valid = active) |
+| Avatar circle | person icon (decorative) | dummy (no user profiles — CAND-011) |
+
+Theme system:
+| Mockup | OLP target |
+|---|---|
+| Tailwind `darkMode: class`, custom palette (`background #0c1324`, `primary #4edea3`), Geist + JetBrains Mono via Google Fonts | Tailwind v4 `@theme` tokens (palette parity); fonts: system stack v1 (offline-first — Geist self-host is CAND-012, needs weight/size decision) |
 
 ## Screens (detail: P0 — one subtask per row group)
 
