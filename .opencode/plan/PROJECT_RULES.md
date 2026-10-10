@@ -62,7 +62,15 @@
 8.4. Record the chosen order and its rationale where the next agent will find it: a line in `TODOS.md` or the task commit message. Any agent (human or AI) picking up this project later must be able to reconstruct why this order was chosen without asking again.
 8.5. Recommending an order never authorizes batching: one task = one local commit still holds. Recommend the sequence, execute one task at a time.
 
-## 9. Change Process for These Rules
+## 9. Parity Verification (Terwo)
+
+9.1. Every port task starts from Terwo evidence, not memory: cite `terwo/panel.js:<line>` (or `public/...`, `install.sh`) for each endpoint path, method, status code, response shape, limit, and message before writing the spec.
+9.2. Each port spec carries a parity mapping of Terwo behavior to OLP behavior, marking each entry `parity` or `deviation + rationale`. Deviations (e.g. 404 instead of 400, English messages, short-lived MySQL connections) are allowed only with a recorded decision in the spec.
+9.3. Messages: user-facing strings become English; keep a legacy-to-new mapping in the spec so reviewers can verify nothing was lost in translation.
+9.4. Verify twice: (a) automated — tests assert exact paths, shapes, limits, and flags from the parity mapping; (b) behavioral — manual smoke where feasible, reported as PASS/FAIL. Injected-test green alone never counts as parity verified (see ADR-003).
+9.5. When a test fails, check the Terwo source first: the bug is as likely in the new test's expectation as in the implementation. Fix the wrong side; never weaken an assertion to reach green without recording why.
+
+## 10. Change Process for These Rules
 
 - Propose additions as: rule text (English) + rationale + example. They take effect once the user approves and this file is committed.
 - Candidate future rules (not yet active): coverage threshold, performance budgets per route, ADR requirement for new dependencies.
