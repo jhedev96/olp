@@ -81,7 +81,8 @@ export function registerStoreRoutes(app: FastifyInstance, opts: StoreOptions): v
     const items = [];
     for (const item of CATALOG) {
       const probe = checkCommand(item, opts.env);
-      const installed = probe === null ? true : await check(probe);
+      // Probes never fail the listing (Terwo execCheck parity: errors count as absent).
+      const installed = probe === null ? true : await check(probe).catch(() => false);
       const rec = runs.get(item.id);
       items.push({
         id: item.id,
