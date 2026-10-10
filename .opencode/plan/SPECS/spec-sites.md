@@ -18,13 +18,13 @@ Success: all five site endpoints behave per table; logs stream into a 300-line r
 export type SiteType = 'node' | 'php' | 'static' | 'go';
 export interface Site { id: string; name: string; type: SiteType; path: string; port: number; created: number }
 export interface SiteStatus extends Site { running: boolean }
-export interface SiteProcess { kill(): void; onOutput(cb: (chunk: string) => void): void; onExit(cb: (code: number | null) => void): void }
+export interface SiteProcess { kill(): void; onOutput(cb: (chunk: string) => void): void; onExit(cb: (code: number | null) => void): void; onError(cb: (err: Error) => void): void }
 export interface SiteSpawner {
   spawn(cmd: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): SiteProcess;
   hasBin(bin: string): Promise<boolean>; // `command -v` probe (tests inject fakes)
 }
 export interface SiteStore { list(): Site[]; save(sites: Site[]): void } // JSON file in production, memory in tests
-export interface SitesOptions { root: string; store: SiteStore; spawner: SiteSpawner; now?: () => number }
+export interface SitesOptions { root: string; store: SiteStore; spawner: SiteSpawner }
 export function registerSitesRoutes(app: FastifyInstance, opts: SitesOptions): void;
 ```
 

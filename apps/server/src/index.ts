@@ -12,6 +12,8 @@ import { nodeDeps, registerStatsRoutes } from './stats.js';
 import { registerFilesRoutes } from './files.js';
 import { TerminalManager, realBackendFactory, registerTerminalRoutes } from './terminal.js';
 import type { TermBackendFactory } from './terminal.js';
+import { fileSiteStore, realSpawner, registerSitesRoutes } from './sites.js';
+import type { SiteSpawner, SiteStore } from './sites.js';
 import { sessionTokenFromHeader } from '@olp/auth';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
@@ -30,6 +32,8 @@ export interface ServerOptions {
   sysDeps?: SysDeps;
   root?: string;
   termFactory?: TermBackendFactory;
+  siteStore?: SiteStore;
+  siteSpawner?: SiteSpawner;
 }
 
 /**
@@ -59,6 +63,11 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
+  registerSitesRoutes(app, {
+    root,
+    store: opts.siteStore ?? fileSiteStore(auth.dataDir),
+    spawner: opts.siteSpawner ?? realSpawner(),
+  });
   const terminal = new TerminalManager({
     shell: process.env['SHELL'] ?? env.shell ?? 'sh',
     cwd: root,
