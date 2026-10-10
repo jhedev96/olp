@@ -1,7 +1,10 @@
 import { detectInit, olpServiceDef, serviceController } from '@olp/services';
 import type { InitSystem } from '@olp/services';
-import type { ParsedArgs } from './args.js';
+import type { ParsedArgs, ParsedCommand } from './args.js';
 import { usageText } from './args.js';
+
+/** CLI verbs (alias of the parser command union). */
+export type CliCommand = ParsedCommand;
 
 /** Host facts (callers probe; pure otherwise). */
 export interface CliEnv {
