@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { AppShell } from '../src/components/shell/AppShell.js';
 import { BrandBlock } from '../src/components/shell/BrandBlock.js';
 import { Sidebar, portSuffix, titleFor } from '../src/components/shell/Sidebar.js';
@@ -78,6 +78,26 @@ describe('web shell sidebar', () => {
       a.getAttribute('data-path'),
     );
     expect(active).toEqual(['files', 'files']);
+  });
+
+  it('renders the 6-tab mobile bar with a More sheet', async () => {
+    stubFetch(() => ({}));
+    const { container } = render(<Sidebar slug="store" />);
+    const bar = container.querySelector('nav[aria-label="Primary"].md\\:hidden');
+    const shorts = Array.from(bar?.querySelectorAll('a') ?? []).map((a) => a.textContent);
+    expect(shorts).toEqual(['Dash', 'Web', 'Data', 'Files', 'Shell']);
+    expect(screen.getByRole('button', { name: 'More' })).not.toBeNull();
+    expect(screen.queryByRole('menu', { name: 'More destinations' })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    });
+    const menu = screen.getByRole('menu', { name: 'More destinations' });
+    expect(within(menu).getByText('Monitor')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(within(menu).getByText('Monitor'));
+    });
+    expect(window.location.pathname).toBe('/monitor');
+    expect(screen.queryByRole('menu', { name: 'More destinations' })).toBeNull();
   });
 
   it('exposes titles and port suffixes', () => {
