@@ -25,10 +25,12 @@ export type ServiceManId =
 
 export interface Environment {
   id: EnvId;
+  inner?: EnvId;             // set when id === 'wsl2': inner distro id
   prettyName: string;          // e.g. "Debian 12", "Termux", "Alpine 3.20"
   pkgman: PkgManId;
   service: ServiceManId;
   isWsl: boolean;
+  libc?: 'glibc' | 'musl' | 'unknown'; // set on Linux; 'musl' on Alpine
   prefix: string;              // e.g. Termux $PREFIX or '' elsewhere
   shell: string;               // resolved absolute shell or 'sh' fallback
   pathExtra: string[];         // dirs to append to PATH for exec env
@@ -42,11 +44,12 @@ export function execEnv(base: NodeJS.ProcessEnv, e: Environment): NodeJS.Process
 
 - `detect()` precedence:
   1. `TERMUX_VERSION` or `PREFIX` containing `com.termux` -> `termux` (pkgman `pkg`, service `pm2`).
-  2. `WSL_DISTRO_NAME` or `/proc/version` containing `microsoft` -> `wsl2` (delegate pkgman/service to inner distro detection).
+  2. `WSL_DISTRO_NAME` or `/proc/version` containing `microsoft` -> `wsl2` wrapper with `isWsl=true` and `inner` set to the inner distro id (e.g. `inner: 'debian'`); `pkgman`/`service` delegate to the inner distro.
   3. `process.platform === 'darwin'` -> `macos` (`brew`, `launchd`).
   4. `process.platform === 'win32'` -> `windows` (`winget`, `windows-sc` stub).
   5. Linux: parse `/etc/os-release` `ID` + `ID_LIKE`: `debian|ubuntu|linuxmint|pop` -> `debian`; `arch|manjaro|endeavouros` -> `arch`; `alpine` -> `alpine`; `fedora` -> `fedora`; `rhel|centos|rocky|almalinux` -> `rhel`.
   6. Fallback `unknown` (`none`/`none`) — callers must fail closed with actionable message.
+- `libc` detection (Linux only): `alpine` -> `musl`; otherwise `glibc` when detectable, else `unknown`. Used for `node-pty` fallback messaging.
 - `detect()` never throws on missing `/etc/os-release`; returns `unknown` with reason logged.
 - `execEnv()` appends `pathExtra` (Termux `$PREFIX/bin`, `/system/bin` on Android) without duplicating entries; never mutates input.
 - `shell` resolution: first existing of `['/bin/bash', '$PREFIX/bin/bash']`, else `'sh'` (preserves legacy fallback semantics).
@@ -105,6 +108,9 @@ export function detectFromSignals(signals: Signals): Environment {
 
 ## 9. Open Questions
 
-- Should `wsl2.id` stay `wsl2` or normalize to inner distro id with `isWsl` flag? Proposal: keep `wsl2` wrapper with `inner: EnvId` field — needs approval.
-- Add `musl` vs `glibc` signal for Alpine `node-pty` fallback messaging? Proposal: yes, minimal `libc` field.
-- Decisions recorded here with date once resolved.
+- None open. See Decisions below.
+
+## 10. Decisions
+
+- 2026-10-10: Keep `wsl2` as wrapper id with `inner: EnvId` field (approved by human). Rationale: preserves WSL-specific behavior (path translation, passthrough service) while reusing inner distro catalog.
+- 2026-10-10: Add minimal `libc: 'glibc' | 'musl' | 'unknown'` field on Linux (approved by human). Rationale: Alpine (`musl`) needs explicit `node-pty` fallback messaging without extra probing.
