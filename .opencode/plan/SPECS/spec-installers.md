@@ -31,7 +31,12 @@ APP_NAME="olp"                                 # was "terwo"
 # Common 5-step shape (Terwo parity):
 # [1/5] Node.js (>=22.12 per ADR-001) + git   — per-OS bootstrap, skips when present
 # [2/5] clone --depth 1 | pull --ff-only      — same three-branch logic as Terwo
-# [3/5] npm ci --omit=dev --no-audit --no-fund (lockfile-committed; `install` only on legacy paths)
+# [3/5] npm ci --no-audit --no-fund (FULL incl. devDeps — the build needs
+#        typescript + @types; lockfile-committed, `install` fallback below)
+# [3b/5] npm run build (root script orders packages before apps; without
+#        this `dist/` never exists on fresh checkouts — smoke-caught 2026-10-10)
+# [3c/5] npm prune --omit=dev --no-audit --no-fund (drop build/test deps for
+#        runtime footprint; Termux storage matters)
 # [4/5] node cli/dist/cli.js install          — delegates to `olp install` (units + enable)
 # [5/5] start + credentials + LAN IP + next-commands (same UX block as Terwo)
 ```
@@ -126,7 +131,7 @@ echo "[2/5] Downloading OLP..."
 | env overrides `:16-19` | `OLP_REPO_URL`/`OLP_DIR` same | parity (renamed) |
 | node+git check `:24-35` | per-OS bootstrap, same skip-if-present | parity |
 | clone/pull 3-branch `:37-46` | same | parity |
-| deps `:48-52` | `npm ci` (lockfile) | deviation (reproducible; `install` fallback documented) |
+| deps `:48-52` | full `ci` + ordered `build` + `prune --omit=dev` | deviation (TS needs devDeps at build; footprint pruned after) |
 | pm2 setup `:54-65` | Termux identical; others → `olp install` | parity/deviation per OS (recorded) |
 | creds scrape `:70-76` | same via pm2/journalctl note | parity |
 | LAN IP + commands + Boot notes `:77-92` | same UX block per OS | parity |
