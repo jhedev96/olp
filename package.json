@@ -15,7 +15,7 @@
     "cli"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@olp/env-core && npm run build --workspace=@olp/auth && npm run build --workspace=@olp/sysinfo && npm run build --workspace=@olp/pkgman && npm run build --workspace=@olp/services && npm run build --workspace=@olp/server && npm run build --workspace=@olp/web && npm run build --workspace=@olp/cli",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   }
