@@ -1,0 +1,9 @@
+# Legacy reference (separate repo, frozen) - not tracked in OLP repo
+terwo/
+# Future monorepo ignores
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
