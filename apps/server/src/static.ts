@@ -20,7 +20,7 @@ export interface StaticOptions {
 export function resolveDistDir(fromUrl: string = import.meta.url): string | undefined {
   const override = process.env['OLP_WEB_DIR'];
   if (override !== undefined && override !== '') return override;
-  const candidate = join(dirname(fileURLToPath(fromUrl)), '..', 'web', 'dist');
+  const candidate = join(dirname(fileURLToPath(fromUrl)), '..', '..', 'web', 'dist');
   return existsSync(candidate) && existsSync(join(candidate, 'index.html')) ? candidate : undefined;
 }
 

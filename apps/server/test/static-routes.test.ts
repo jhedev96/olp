@@ -87,6 +87,16 @@ describe('resolveDistDir', () => {
     }
     expect(resolveDistDir('file:///definitely/not/here.js')).toBeUndefined();
   });
+
+  it('resolves the sibling apps/web/dist from server module depth', () => {
+    const root = mkdtempSync(join(tmpdir(), 'olp-layout-'));
+    const serverDir = join(root, 'apps', 'server', 'dist');
+    const webDist = join(root, 'apps', 'web', 'dist');
+    mkdirSync(serverDir, { recursive: true });
+    mkdirSync(webDist, { recursive: true });
+    writeFileSync(join(webDist, 'index.html'), 'x');
+    expect(resolveDistDir(`file://${join(serverDir, 'index.js')}`)).toBe(webDist);
+  });
 });
 
 describe('server static routes', () => {
