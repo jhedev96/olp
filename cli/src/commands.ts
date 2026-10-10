@@ -73,14 +73,10 @@ export function planInstall(env: CliEnv, inputs: PlanInputs): InstallPlan {
   };
 }
 
-function tail(text: string): string {
-  return text.slice(-500);
-}
-
-/** Log tail for failures (house parity with service control). */
+/** Plain error text (the services layer already tails to 500 — never slice twice). */
 function errText(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
-  return tail(message);
+  return message === '' ? 'unknown error' : message;
 }
 
 /**
