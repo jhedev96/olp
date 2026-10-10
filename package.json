@@ -1,6 +1,6 @@
 {
   "name": "openlocalpanel",
-  "version": "2.0.0-alpha.0",
+  "version": "2.0.0-alpha.1",
   "private": true,
   "description": "OpenLocalPanel (OLP) — multi-environment local operations panel",
   "license": "MIT",

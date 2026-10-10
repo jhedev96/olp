@@ -1,6 +1,6 @@
 {
   "name": "@olp/server",
-  "version": "2.0.0-alpha.0",
+  "version": "2.0.0-alpha.1",
   "private": true,
   "description": "OpenLocalPanel API server (Fastify)",
   "license": "MIT",
@@ -20,10 +20,10 @@
   "dependencies": {
     "@fastify/static": "^10.1.6",
     "@fastify/websocket": "^11.3.4",
-    "@olp/auth": "2.0.0-alpha.0",
-    "@olp/env-core": "2.0.0-alpha.0",
-    "@olp/pkgman": "2.0.0-alpha.0",
-    "@olp/sysinfo": "2.0.0-alpha.0",
+    "@olp/auth": "2.0.0-alpha.1",
+    "@olp/env-core": "2.0.0-alpha.1",
+    "@olp/pkgman": "2.0.0-alpha.1",
+    "@olp/sysinfo": "2.0.0-alpha.1",
     "fastify": "^5.0.0",
     "mysql2": "^3.24.5",
     "pg": "^8.23.1"

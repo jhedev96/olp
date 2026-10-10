@@ -37,7 +37,7 @@ import { getSystemInfo } from '@olp/sysinfo';
 import { sessionTokenFromHeader } from '@olp/auth';
 
 /** Server version (single source of truth for health/settings payloads). */
-export const SERVER_VERSION = '2.0.0-alpha.0';
+export const SERVER_VERSION = '2.0.0-alpha.1';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
 export interface ServerHandle {

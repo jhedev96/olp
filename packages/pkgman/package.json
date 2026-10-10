@@ -1,6 +1,6 @@
 {
   "name": "@olp/pkgman",
-  "version": "2.0.0-alpha.0",
+  "version": "2.0.0-alpha.1",
   "private": true,
   "description": "Per-OS package catalog for OpenLocalPanel (pure data, zero runtime deps)",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "lint": "echo '@olp/pkgman: no lint yet'"
   },
   "dependencies": {
-    "@olp/env-core": "2.0.0-alpha.0"
+    "@olp/env-core": "2.0.0-alpha.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

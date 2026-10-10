@@ -21,7 +21,7 @@ function stubApi(handler: (url: string, method: string, body: unknown) => { stat
 
 const SETTINGS = {
   username: 'ops',
-  version: '2.0.0-alpha.0',
+  version: '2.0.0-alpha.1',
   telegram: { botToken: 'tok', chatId: '123', enabled: true, commandsEnabled: false },
 };
 
@@ -32,7 +32,7 @@ describe('web settings page', () => {
       render(<SettingsPage />);
     });
     expect(screen.getByText('ops')).not.toBeNull();
-    expect(screen.getByText(/v2\.0\.0-alpha\.0/)).not.toBeNull();
+    expect(screen.getByText(/v2\.0\.0-alpha\.1/)).not.toBeNull();
     expect((screen.getByPlaceholderText('Bot token') as HTMLInputElement).value).toBe('tok');
     expect((screen.getByPlaceholderText('Chat ID') as HTMLInputElement).value).toBe('123');
   });

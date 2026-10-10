@@ -1,6 +1,6 @@
 {
   "name": "@olp/cli",
-  "version": "2.0.0-alpha.0",
+  "version": "2.0.0-alpha.1",
   "private": true,
   "description": "Command-line interface for OpenLocalPanel",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "lint": "echo '@olp/cli: no lint yet'"
   },
   "dependencies": {
-    "@olp/services": "2.0.0-alpha.0"
+    "@olp/services": "2.0.0-alpha.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

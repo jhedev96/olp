@@ -1,6 +1,6 @@
 {
   "name": "@olp/auth",
-  "version": "2.0.0-alpha.0",
+  "version": "2.0.0-alpha.1",
   "private": true,
   "description": "Authentication primitives for OpenLocalPanel (PBKDF2, sessions, config)",
   "license": "MIT",
