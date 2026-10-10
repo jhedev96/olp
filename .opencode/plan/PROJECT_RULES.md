@@ -95,3 +95,19 @@ current wave's scope.
 
 - Propose additions as: rule text (English) + rationale + example. They take effect once the user approves and this file is committed.
 - Candidate future rules (not yet active): coverage threshold, performance budgets per route, ADR requirement for new dependencies.
+
+## 12. Branching & Production Protection
+
+12.1. Never commit directly to production branches (`main`, `master`).
+All changes land via a short-lived feature branch merged after review
+(PR or human-approved local merge). `main` accepts merge commits only.
+12.2. Branch naming: `<type>/<phase>-<topic>` matching the Conventional
+Commit type, e.g. `feat/p1-appshell`, `docs/rules-branch-policy`,
+`fix/files-traversal`.
+12.3. `main` stays green: the feature branch must build (`npm run build`)
+and pass its scope tests before merge. Push the feature branch to `origin`
+for backup; delete it after merge.
+12.4. Exception: a direct `main` commit is allowed only to restore a broken
+build (revert/forward-fix) with human approval recorded in the commit
+message or task. Example: `git checkout -b feat/p1-appshell` → commit →
+`git push -u origin feat/p1-appshell` → merge → `git push origin main`.
