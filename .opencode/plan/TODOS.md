@@ -50,8 +50,12 @@
   services 7, cli 10)
 - [x] Create `jhedev96/olp` via `gh repo create` (done 2026-10-10, public)
 - [x] Add remote + push `main` (done 2026-10-10, tracking `origin/main`)
+- [x] Live smoke Debian-class (2026-10-10, proot Ubuntu box: fresh clone →
+  `npm ci` → ordered build → `prune` → boot → `smoke/linux.mjs` 27/27
+  green incl. jail escapes denied + real pipe WS echo; caught 2 real bugs:
+  unordered workspace builds, `resolveDistDir` off-by-one)
 - [ ] Live smoke Termux (installer, login, files, terminal, boot story)
-- [ ] Live smoke Debian (installer, systemd unit, login, stats)
+- [ ] Live smoke native Debian VPS (systemd unit via `olp install`)
 - [ ] Fill release version (bump off `2.0.0-alpha.0`), tag, GitHub release
 - [ ] Migration dry-run Terwo → OLP on a spare profile
 
