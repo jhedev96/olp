@@ -48,9 +48,8 @@
 - [x] Full root verify green (2026-10-10: build exit 0, 258/258 tests —
   server 118, web 61, auth 21, env-core 20, sysinfo 15, pkgman 6,
   services 7, cli 10)
-- [ ] Create `jhedev96/olp` via `gh repo create` (human: repo does not
-  exist yet; `gh` authed as jhedev96, verified 2026-10-10)
-- [ ] Add remote + push `main`
+- [x] Create `jhedev96/olp` via `gh repo create` (done 2026-10-10, public)
+- [x] Add remote + push `main` (done 2026-10-10, tracking `origin/main`)
 - [ ] Live smoke Termux (installer, login, files, terminal, boot story)
 - [ ] Live smoke Debian (installer, systemd unit, login, stats)
 - [ ] Fill release version (bump off `2.0.0-alpha.0`), tag, GitHub release
