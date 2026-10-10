@@ -1,14 +1,29 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { detect } from '@olp/env-core';
+import type { Environment } from '@olp/env-core';
+import type { SysDeps } from '@olp/sysinfo';
 import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
+import { nodeDeps, registerStatsRoutes } from './stats.js';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
 export interface ServerHandle {
   app: FastifyInstance;
   auth: AuthContext;
+  env: Environment;
+}
+
+/** Injectable server inputs (tests pass fakes; production uses defaults). */
+export interface ServerOptions {
+  dataDir?: string;
+  legacyDir?: string;
+  env?: Environment;
+  sysDeps?: SysDeps;
+  root?: string;
 }
 
 /**
@@ -18,10 +33,13 @@ export interface ServerHandle {
  * auth; every other `/api/*` route requires a valid `tpsid` session.
  * Pass explicit dirs in tests to avoid touching the real home directory.
  */
-export function buildServer(dirs?: { dataDir?: string; legacyDir?: string }): ServerHandle {
+export function buildServer(opts: ServerOptions = {}): ServerHandle {
   const resolved = resolveDirs();
-  const dataDir = dirs?.dataDir ?? resolved.dataDir;
-  const legacyDir = dirs?.legacyDir ?? resolved.legacyDir;
+  const dataDir = opts.dataDir ?? resolved.dataDir;
+  const legacyDir = opts.legacyDir ?? resolved.legacyDir;
+  const env = opts.env ?? detect();
+  const sysDeps = opts.sysDeps ?? nodeDeps();
+  const root = opts.root ?? process.env['PANEL_ROOT'] ?? homedir();
   const app = Fastify({ logger: false });
 
   app.get('/healthz', async () => ({ ok: true, service: 'olp' }));
@@ -33,7 +51,8 @@ export function buildServer(dirs?: { dataDir?: string; legacyDir?: string }): Se
 
   const auth = createAuthContext(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
-  return { app, auth };
+  registerStatsRoutes(app, { env, deps: sysDeps, root });
+  return { app, auth, env };
 }
 
 /**
