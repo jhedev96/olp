@@ -34,6 +34,8 @@ export interface TermLike {
   dispose(): void;
   attachCustomKeyEventHandler(handler: (e: KeyboardEvent) => boolean): void;
   getSelection(): string;
+  /** Live option switch (font size buttons; fakes may omit it). */
+  setOption?(key: string, value: unknown): void;
   readonly cols: number;
   readonly rows: number;
 }
@@ -66,9 +68,13 @@ function defaultTerminal(): { term: TermLike; fit: { fit(): void } } {
 }
 
 /**
- * Terminal page (Terwo terminal-tab parity): xterm + fit addon, WS `/term`
- * with `{t:'in'|'rs'|'new'}` protocol, connect/new/clear/paste buttons,
- * right-click paste, mobile keymap with sticky ctrl/alt, pipe-mode badge.
+ * Terminal page (mockup terminal parity): xterm + fit addon, WS `/term`
+ * with `{t:'in'|'rs'|'new'}` protocol, pty/pipe badge, font-size
+ * controls, connect/new/clear/paste buttons, right-click paste, mobile
+ * keymap with sticky ctrl/alt. Honestly omitted (no source, backend
+ * frozen): multi-tab sessions, split panes, per-tab TTY (CAND-017),
+ * WS latency badge (CAND-018), kernel line of the MOTD (CAND-014 —
+ * the art itself arrives via the server greeting).
  */
 export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const createTerminal = deps.createTerminal ?? defaultTerminal;
@@ -85,6 +91,7 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const [ctrl, setCtrl] = useState(false);
   const [alt, setAlt] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
+  const [fontSize, setFontSize] = useState(14);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -218,6 +225,17 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
     }
   };
 
+  const changeFont = (delta: number): void => {
+    const next = Math.min(24, Math.max(10, fontSize + delta));
+    setFontSize(next);
+    try {
+      termRef.current?.setOption?.('fontSize', next);
+      fitRef.current?.fit();
+    } catch {
+      // headless/test renderers without layout
+    }
+  };
+
   const paste = async (): Promise<void> => {
     try {
       const text = await navigator.clipboard.readText();
@@ -250,8 +268,19 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold">Terminal</h1>
         <span className={status === 'Connected' ? 'text-sm text-green-400' : 'text-sm text-neutral-400'}>{status}</span>
-        {pipe && <span className="text-xs text-yellow-400">pipe mode (no pty)</span>}
+        {pipe ? (
+          <span className="text-xs text-yellow-400">pipe mode (no pty)</span>
+        ) : (
+          <span className="text-xs text-emerald-400">pty</span>
+        )}
         <span className="flex-1" />
+        <Button size="sm" variant="ghost" aria-label="Decrease font size" onClick={() => changeFont(-1)}>
+          A-
+        </Button>
+        <span className="text-xs text-neutral-500">{fontSize}px</span>
+        <Button size="sm" variant="ghost" aria-label="Increase font size" onClick={() => changeFont(1)}>
+          A+
+        </Button>
         <Button size="sm" variant="outline" onClick={() => termRef.current?.clear()}>
           Clear
         </Button>

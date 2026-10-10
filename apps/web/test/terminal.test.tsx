@@ -43,6 +43,10 @@ class FakeTerm implements TermLike {
   getSelection(): string {
     return this.selection;
   }
+  setOption(key: string, value: unknown): void {
+    if (key === 'fontSize' && typeof value === 'number') this.fontPx = value;
+  }
+  fontPx = 14;
   emitInput(data: string): void {
     this.dataCb(data);
   }
@@ -177,5 +181,22 @@ describe('web terminal page', () => {
       sockets[0]?.drop();
     });
     expect(screen.getByText('Disconnected')).not.toBeNull();
+  });
+
+  it('shows the pty badge and adjusts font size', () => {
+    const { term, sockets } = mounted();
+    act(() => {
+      sockets[0]?.open();
+    });
+    expect(screen.getByText('pty')).not.toBeNull();
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Increase font size'));
+    });
+    expect(term.fontPx).toBe(15);
+    expect(screen.getByText('15px')).not.toBeNull();
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Decrease font size'));
+    });
+    expect(term.fontPx).toBe(14);
   });
 });
