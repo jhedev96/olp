@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -14,6 +14,8 @@ import { TerminalManager, realBackendFactory, registerTerminalRoutes } from './t
 import type { TermBackendFactory } from './terminal.js';
 import { fileSiteStore, realSpawner, registerSitesRoutes } from './sites.js';
 import type { SiteSpawner, SiteStore } from './sites.js';
+import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
+import type { ProxyStore, ProxySystem } from './proxy.js';
 import { sessionTokenFromHeader } from '@olp/auth';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
@@ -34,6 +36,8 @@ export interface ServerOptions {
   termFactory?: TermBackendFactory;
   siteStore?: SiteStore;
   siteSpawner?: SiteSpawner;
+  proxyStore?: ProxyStore;
+  proxySys?: ProxySystem;
 }
 
 /**
@@ -67,6 +71,13 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     root,
     store: opts.siteStore ?? fileSiteStore(auth.dataDir),
     spawner: opts.siteSpawner ?? realSpawner(),
+  });
+  registerProxyRoutes(app, {
+    dataDir: auth.dataDir,
+    sitesDir: join(auth.dataDir, 'nginx', 'sites'),
+    prefix: env.prefix,
+    store: opts.proxyStore ?? fileProxyStore(auth.dataDir),
+    sys: opts.proxySys ?? nodeProxySys(),
   });
   const terminal = new TerminalManager({
     shell: process.env['SHELL'] ?? env.shell ?? 'sh',
