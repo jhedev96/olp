@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { CronPage } from '../src/pages/cron.js';
 
 afterEach(() => {
@@ -73,9 +73,8 @@ describe('web cron page', () => {
     expect(save?.body).toMatchObject({ name: 'j', schedule: '* * * * *', command: '/bin/a' });
   });
 
-  it('toggles and deletes with confirm', async () => {
+  it('toggles and deletes with dialog', async () => {
     const { calls } = stubApi((url) => base(url));
-    (window as unknown as Record<string, unknown>).confirm = () => true;
     await act(async () => {
       render(<CronPage />);
     });
@@ -85,6 +84,11 @@ describe('web cron page', () => {
     expect(calls.some((c) => c.url === '/api/cron/jobs/a1/toggle')).toBe(true);
     await act(async () => {
       fireEvent.click(screen.getAllByText('Delete')[0] as HTMLElement);
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('This cannot be undone.');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     });
     expect(calls.some((c) => c.url === '/api/cron/jobs/a1')).toBe(true);
   });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -26,8 +27,8 @@ const PRESETS: Array<{ value: string; label: string }> = [
 
 /**
  * Cron scheduler (Terwo cron-tab parity): daemon status + start/stop,
- * preset-driven add form, jobs table with enable/disable + delete
- * (confirm-gated). List failures keep the previous render.
+ * preset-driven add form, jobs table with enable/disable + dialog-gated
+ * delete. List failures keep the previous render.
  */
 export function CronPage(): ReactElement {
   const [running, setRunning] = useState<boolean | null>(null);
@@ -35,6 +36,7 @@ export function CronPage(): ReactElement {
   const [preset, setPreset] = useState(PRESETS[0]?.value ?? '* * * * *');
   const [form, setForm] = useState({ name: '', schedule: '', command: '' });
   const [error, setError] = useState('');
+  const [pendingJob, setPendingJob] = useState<CronJobRow | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -90,9 +92,15 @@ export function CronPage(): ReactElement {
     await load();
   };
 
-  const remove = async (job: CronJobRow): Promise<void> => {
-    if (!window.confirm(`Delete cron job "${job.name}"? This cannot be undone.`)) return;
-    await apiJson(`/api/cron/jobs/${job.id}`, { method: 'DELETE' }).catch(() => undefined);
+  const remove = (job: CronJobRow): void => {
+    setPendingJob(job);
+  };
+
+  const confirmRemove = async (): Promise<void> => {
+    if (pendingJob === null) return;
+    const id = pendingJob.id;
+    setPendingJob(null);
+    await apiJson(`/api/cron/jobs/${id}`, { method: 'DELETE' }).catch(() => undefined);
     await load();
   };
 
@@ -176,6 +184,15 @@ export function CronPage(): ReactElement {
           </tbody>
         </table>
       </Card>
+      <ConfirmDialog
+        open={pendingJob !== null}
+        title="Delete cron job"
+        message={pendingJob === null ? '' : `Delete cron job "${pendingJob.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive={true}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => setPendingJob(null)}
+      />
     </main>
   );
 }

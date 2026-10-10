@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { SitesPage } from '../src/pages/sites.js';
 
 afterEach(() => {
@@ -58,7 +58,6 @@ describe('web sites page', () => {
 
   it('starts stops and deletes with reload', async () => {
     const { calls } = stubApi((url) => baseHandler(url));
-    (window as unknown as Record<string, unknown>).confirm = () => true;
     await act(async () => {
       render(<SitesPage />);
     });
@@ -68,6 +67,11 @@ describe('web sites page', () => {
     expect(calls.some((c) => c.url === '/api/sites/a1/stop' && c.method === 'POST')).toBe(true);
     await act(async () => {
       fireEvent.click(screen.getByText('Delete'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('Delete website "web"?');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     });
     expect(calls.some((c) => c.url === '/api/sites/a1/delete')).toBe(true);
   });
@@ -112,7 +116,6 @@ describe('web sites page', () => {
 
   it('manages nginx service and proxies', async () => {
     const { calls } = stubApi((url) => baseHandler(url));
-    (window as unknown as Record<string, unknown>).confirm = () => true;
     await act(async () => {
       render(<SitesPage />);
     });

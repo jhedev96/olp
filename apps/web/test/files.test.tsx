@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FilesPage } from '../src/pages/files.js';
 
 afterEach(() => {
@@ -84,27 +84,40 @@ describe('web files page', () => {
     expect(calls.some((c) => c.url === '/api/mkdir' && (c.body as { name: string }).name === 'ndir')).toBe(true);
   });
 
-  it('confirms deletes and prompts renames', async () => {
+  it('confirms deletes and prompts renames via dialog', async () => {
     const { calls } = stubApi(filesHandler);
-    const confirm = vi.fn(() => true);
-    const prompt = vi.fn(() => 'b.txt');
-    (window as unknown as Record<string, unknown>).confirm = confirm;
-    (window as unknown as Record<string, unknown>).prompt = prompt;
     await act(async () => {
       render(<FilesPage />);
     });
-    const deletes = screen.getAllByText('Delete');
     await act(async () => {
-      fireEvent.click(deletes[0] as HTMLElement);
+      fireEvent.click(screen.getAllByText('Delete')[0] as HTMLElement);
     });
-    expect(confirm).toHaveBeenCalledOnce();
+    const delDialog = screen.getByRole('dialog');
+    expect(delDialog.textContent).toContain('This cannot be undone.');
+    await act(async () => {
+      fireEvent.click(within(delDialog).getByRole('button', { name: 'Delete' }));
+    });
     expect(calls.some((c) => c.url === '/api/delete')).toBe(true);
 
     await act(async () => {
       fireEvent.click(screen.getAllByText('Rename')[0] as HTMLElement);
     });
-    expect(prompt).toHaveBeenCalledOnce();
-    expect(calls.some((c) => c.url === '/api/rename' && (c.body as { to: string }).to === 'b.txt')).toBe(true);
+    const renameDialog = screen.getByRole('dialog');
+    const input = within(renameDialog).getByRole('textbox') as HTMLInputElement;
+    expect(input.value).toBe('docs');
+    fireEvent.change(input, { target: { value: 'docs2' } });
+    await act(async () => {
+      fireEvent.click(within(renameDialog).getByRole('button', { name: 'Rename' }));
+    });
+    expect(calls.some((c) => c.url === '/api/rename' && (c.body as { to: string }).to === 'docs2')).toBe(true);
+
+    fireEvent.click(screen.getByText('Touch'));
+    const touchDialog = screen.getByRole('dialog');
+    fireEvent.change(within(touchDialog).getByRole('textbox'), { target: { value: 'n.txt' } });
+    await act(async () => {
+      fireEvent.click(within(touchDialog).getByRole('button', { name: 'Create' }));
+    });
+    expect(calls.some((c) => c.url === '/api/touch' && (c.body as { name: string }).name === 'n.txt')).toBe(true);
   });
 
   it('opens the editor and saves', async () => {

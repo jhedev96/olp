@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { SettingsPage } from '../src/pages/settings.js';
 
 afterEach(() => {
@@ -104,15 +104,19 @@ describe('web settings page', () => {
     expect(screen.getByText('Test message sent')).not.toBeNull();
   });
 
-  it('logs out all sessions with confirm', async () => {
+  it('logs out all sessions with dialog', async () => {
     const { calls } = stubApi(() => ({ status: 200, json: SETTINGS }));
-    (window as unknown as Record<string, unknown>).confirm = () => true;
     const seen: string[] = [];
     await act(async () => {
       render(<SettingsPage goto={(url) => seen.push(url)} />);
     });
     await act(async () => {
       fireEvent.click(screen.getByText('Log out all sessions'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('every device');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Log out all' }));
     });
     expect(calls.some((c) => c.url === '/api/auth/logout-all')).toBe(true);
     expect(seen).toEqual(['/login']);

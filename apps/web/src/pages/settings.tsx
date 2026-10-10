@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -15,7 +16,7 @@ export interface SettingsPageDeps {
  * Settings (Terwo settings-tab parity): username display + version,
  * change-username, change-password (client confirm check, field clear,
  * delayed login redirect), telegram form + save + test button,
- * confirm-gated logout-all.
+ * dialog-gated logout-all.
  */
 export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const goto =
@@ -36,6 +37,7 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [pwMessage, setPwMessage] = useState('');
   const [tg, setTg] = useState({ botToken: '', chatId: '', enabled: false, commandsEnabled: true });
   const [tgMessage, setTgMessage] = useState('');
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -125,10 +127,12 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
     }
   };
 
-  const logoutAll = async (): Promise<void> => {
-    if (!window.confirm('Log out all sessions? End all active sessions on every device. You will need to log in again.')) {
-      return;
-    }
+  const logoutAll = (): void => {
+    setConfirmLogoutAll(true);
+  };
+
+  const confirmLogoutAllAction = async (): Promise<void> => {
+    setConfirmLogoutAll(false);
     await apiJson('/api/auth/logout-all', { method: 'POST' }).catch(() => undefined);
     goto('/login');
   };
@@ -205,6 +209,15 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       <Button size="sm" variant="outline" onClick={() => void logoutAll()}>
         Log out all sessions
       </Button>
+      <ConfirmDialog
+        open={confirmLogoutAll}
+        title="Log out all sessions"
+        message="Log out all sessions? End all active sessions on every device. You will need to log in again."
+        confirmLabel="Log out all"
+        destructive={true}
+        onConfirm={() => void confirmLogoutAllAction()}
+        onCancel={() => setConfirmLogoutAll(false)}
+      />
     </main>
   );
 }
