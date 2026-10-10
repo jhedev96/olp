@@ -1,0 +1,28 @@
+{
+  "name": "@olp/server",
+  "version": "2.0.0-alpha.0",
+  "private": true,
+  "description": "OpenLocalPanel API server (Fastify)",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22.12",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "echo '@olp/server: no tests yet'",
+    "lint": "echo '@olp/server: no lint yet'",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0"
+  }
+}
