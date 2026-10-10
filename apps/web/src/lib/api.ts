@@ -18,10 +18,16 @@ export class ApiError extends Error {
 /**
  * Fetch with session handling: a 401 redirects to `/login` and throws
  * (prevents cascading renders); anything else returns the raw response.
+ * Pass `{ unauthorized: 'rethrow' }` on the login page itself, where a
+ * redirect would just reload the form and swallow the server message.
  */
-export async function api(path: string, opts: RequestInit = {}): Promise<Response> {
+export async function api(
+  path: string,
+  opts: RequestInit = {},
+  behavior: { unauthorized?: 'redirect' | 'rethrow' } = {},
+): Promise<Response> {
   const res = await fetch(path, { credentials: 'same-origin', ...opts });
-  if (res.status === 401) {
+  if (res.status === 401 && (behavior.unauthorized ?? 'redirect') === 'redirect') {
     window.location.href = '/login';
     throw new ApiError(401, 'Session expired');
   }
@@ -31,9 +37,15 @@ export async function api(path: string, opts: RequestInit = {}): Promise<Respons
 /**
  * JSON helper: non-2xx answers throw `ApiError` with the server's
  * `{error}` message when present, else a status-based fallback.
+ * (In default 401 mode the redirect above wins; pass `rethrow` on the
+ * login page to surface the server message instead of reloading.)
  */
-export async function apiJson<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const res = await api(path, opts);
+export async function apiJson<T>(
+  path: string,
+  opts: RequestInit = {},
+  behavior: { unauthorized?: 'redirect' | 'rethrow' } = {},
+): Promise<T> {
+  const res = await api(path, opts, behavior);
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {

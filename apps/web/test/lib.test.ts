@@ -57,6 +57,17 @@ describe('web lib/api', () => {
     await expect(api('/api/me')).rejects.toThrow('down');
   });
 
+  it('rethrows 401 without redirecting when asked', async () => {
+    const location = { href: '' };
+    vi.stubGlobal('window', { location });
+    vi.stubGlobal('fetch', () => Promise.resolve(jsonResponse(401, { error: 'Invalid username or password' })));
+    await expect(apiJson('/api/login', {}, { unauthorized: 'rethrow' })).rejects.toMatchObject({
+      status: 401,
+      message: 'Invalid username or password',
+    });
+    expect(location.href).toBe('');
+  });
+
   it('parses JSON and surfaces server errors', async () => {
     vi.stubGlobal('window', { location: { href: '' } });
     vi.stubGlobal('fetch', () => Promise.resolve(jsonResponse(200, { username: 'ops' })));
