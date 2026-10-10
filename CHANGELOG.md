@@ -3,6 +3,13 @@
 All notable changes, newest first. Versioning: `2.0.0-alpha.x` until the
 v2.0.0 release cut.
 
+## [v2.0.0-alpha.1] — 2026-10-10 ([release notes](https://github.com/jhedev96/olp/releases/tag/v2.0.0-alpha.1))
+
+First public alpha: full Terwo surface parity (see route audit in
+`.opencode/plan/TODOS.md`), 258 tests green, Debian-class live smoke
+27/27, per-OS installers, `olp` CLI. Needs on-device verification on
+Termux/Alpine/macOS hardware.
+
 ## [Unreleased]
 
 ### Added

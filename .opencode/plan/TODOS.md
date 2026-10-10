@@ -56,7 +56,8 @@
   unordered workspace builds, `resolveDistDir` off-by-one)
 - [ ] Live smoke Termux (installer, login, files, terminal, boot story)
 - [ ] Live smoke native Debian VPS (systemd unit via `olp install`)
-- [ ] Fill release version (bump off `2.0.0-alpha.0`), tag, GitHub release
+- [x] Fill release version (bump off `2.0.0-alpha.0`), tag, GitHub release
+  (`v2.0.0-alpha.1` tagged + released 2026-10-10, prerelease flag on)
 - [ ] Migration dry-run Terwo → OLP on a spare profile
 
 ## Route Audit — backend surface complete (2026-10-10)
