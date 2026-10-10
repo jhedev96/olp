@@ -14,6 +14,7 @@ import { TerminalManager, realBackendFactory, registerTerminalRoutes } from './t
 import type { TermBackendFactory } from './terminal.js';
 import { fileSiteStore, realSpawner, registerSitesRoutes } from './sites.js';
 import type { SiteSpawner, SiteStore } from './sites.js';
+import { createSiteRuntime } from './sites.js';
 import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
 import type { ProxyStore, ProxySystem } from './proxy.js';
 import { fileRegistry, mysqlDriver, normalizeConfig, pgDriver, registerDatabaseRoutes } from './database.js';
@@ -24,7 +25,15 @@ import { nodeCronBackend, registerCronRoutes } from './cron.js';
 import type { CronBackend } from './cron.js';
 import { realSpawnShell, registerStoreRoutes } from './store.js';
 import type { SpawnShell } from './store.js';
+import { fileSettingsStore, registerSettingsRoutes } from './settings.js';
+import type { SettingsStore } from './settings.js';
+import { TelegramBot, nodeTelegramApi } from './telegram.js';
+import type { BotStatus, TelegramApi } from './telegram.js';
+import { getSystemInfo } from '@olp/sysinfo';
 import { sessionTokenFromHeader } from '@olp/auth';
+
+/** Server version (single source of truth for health/settings payloads). */
+export const SERVER_VERSION = '2.0.0-alpha.0';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
 export interface ServerHandle {
@@ -32,6 +41,7 @@ export interface ServerHandle {
   auth: AuthContext;
   env: Environment;
   terminal: TerminalManager;
+  telegram: { bot: TelegramBot; startPoller: () => void; stopPoller: () => void };
 }
 
 /** Injectable server inputs (tests pass fakes; production uses defaults). */
@@ -54,6 +64,8 @@ export interface ServerOptions {
   storeCheck?: (cmd: string) => Promise<boolean>;
   storeSpawn?: SpawnShell;
   storeNotify?: (text: string) => void;
+  settingsStore?: SettingsStore;
+  telegramApi?: TelegramApi;
 }
 
 /**
@@ -76,17 +88,20 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   app.get('/api/health', async () => ({
     ok: true,
     service: 'olp',
-    version: '2.0.0-alpha.0',
+    version: SERVER_VERSION,
   }));
 
   const auth = createAuthContext(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
+  const siteStore = opts.siteStore ?? fileSiteStore(auth.dataDir);
+  const siteRuntime = createSiteRuntime();
   registerSitesRoutes(app, {
     root,
-    store: opts.siteStore ?? fileSiteStore(auth.dataDir),
+    store: siteStore,
     spawner: opts.siteSpawner ?? realSpawner(),
+    runtime: siteRuntime,
   });
   registerProxyRoutes(app, {
     dataDir: auth.dataDir,
@@ -107,12 +122,80 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
   });
   registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend() });
+  const settingsStore = opts.settingsStore ?? fileSettingsStore(auth.dataDir);
+  const telegramApi = opts.telegramApi ?? nodeTelegramApi();
+  const botStatus = async (): Promise<BotStatus> => {
+    const info = await getSystemInfo(env, sysDeps, root);
+    return {
+      hostname: info.hostname,
+      uptime: info.uptime,
+      cpu: info.cpu,
+      mem: info.mem,
+      disk: info.disk,
+      battery: info.battery,
+      sites: siteStore.list().map((site) => ({
+        name: site.name,
+        type: site.type,
+        port: site.port,
+        running: siteRuntime.running.has(site.id),
+      })),
+    };
+  };
+  const bot = new TelegramBot({
+    settings: () => settingsStore.load().telegram,
+    api: telegramApi,
+    status: botStatus,
+  });
+  const notifyTelegram = (text: string): void => {
+    try {
+      const tg = settingsStore.load().telegram;
+      if (!tg.enabled || tg.botToken === '' || tg.chatId === '') return;
+      telegramApi.sendMessage(tg.botToken, tg.chatId, text).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.log('Telegram failed:', err instanceof Error ? err.message : String(err));
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.log('Telegram failed:', err instanceof Error ? err.message : String(err));
+    }
+  };
+  let pollTimer: NodeJS.Timeout | null = null;
+  const stopPoller = (): void => {
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
+  const startPoller = (): void => {
+    stopPoller();
+    bot.drain().catch((err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.log('Telegram poll:', err instanceof Error ? err.message : String(err));
+    });
+    pollTimer = setInterval(() => {
+      bot.pollOnce().catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.log('Telegram poll:', err instanceof Error ? err.message : String(err));
+      });
+    }, 10000);
+    pollTimer.unref();
+  };
+  registerSettingsRoutes(app, {
+    store: settingsStore,
+    username: () => auth.config.username,
+    version: SERVER_VERSION,
+    onTelegramConfig: () => {
+      stopPoller();
+      startPoller();
+    },
+    testSend: (tg) => telegramApi.sendMessage(tg.botToken, tg.chatId, 'OLP notification test successful!'),
+  });
   registerStoreRoutes(app, {
     env: env.id,
     home: homedir(),
     check: opts.storeCheck,
     spawnShell: opts.storeSpawn ?? realSpawnShell,
-    notify: opts.storeNotify,
+    notify: opts.storeNotify ?? notifyTelegram,
   });
   const terminal = new TerminalManager({
     shell: process.env['SHELL'] ?? env.shell ?? 'sh',
@@ -128,7 +211,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     reply.code(400);
     await reply.send({ error: err.message || 'Failed' });
   });
-  return { app, auth, env, terminal };
+  return { app, auth, env, terminal, telegram: { bot, startPoller, stopPoller } };
 }
 
 /**
@@ -139,7 +222,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
 async function main(): Promise<void> {
   const port = Number.parseInt(process.env['PANEL_PORT'] ?? '8080', 10);
   const host = process.env['PANEL_HOST'] ?? '127.0.0.1';
-  const { app, auth } = buildServer();
+  const { app, auth, telegram } = buildServer();
   if (auth.created && auth.plaintextPassword !== undefined) {
     // eslint-disable-next-line no-console
     console.log(
@@ -149,6 +232,7 @@ async function main(): Promise<void> {
   setInterval(() => {
     auth.store.prune();
   }, 3600 * 1000).unref();
+  telegram.startPoller();
   await app.listen({ port, host });
   // eslint-disable-next-line no-console
   console.log(`OLP listening on http://${host}:${port}`);

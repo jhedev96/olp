@@ -120,11 +120,24 @@ interface Running {
   started: number;
 }
 
+/** Shared live state (registry stays in the store; liveness lives here). */
+export interface SiteRuntime {
+  running: Map<string, Running>;
+  deadLogs: Map<string, string>;
+}
+
+/** Fresh isolated runtime (tests get one per server; production one global). */
+export function createSiteRuntime(): SiteRuntime {
+  return { running: new Map(), deadLogs: new Map() };
+}
+
 /** Inputs for {@link registerSitesRoutes}. */
 export interface SitesOptions {
   root: string;
   store: SiteStore;
   spawner: SiteSpawner;
+  /** Shared liveness maps (defaults to an isolated runtime). */
+  runtime?: SiteRuntime;
 }
 
 function strField(body: Record<string, unknown>, key: string): string {
@@ -142,8 +155,7 @@ function isSiteType(value: unknown): value is SiteType {
  * error handler (400 `{error}`, Terwo parity).
  */
 export function registerSitesRoutes(app: FastifyInstance, opts: SitesOptions): void {
-  const running = new Map<string, Running>();
-  const deadLogs = new Map<string, string>();
+  const { running, deadLogs } = opts.runtime ?? createSiteRuntime();
 
   const findSite = (id: string): Site | undefined => opts.store.list().find((s) => s.id === id);
 
