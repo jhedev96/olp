@@ -121,4 +121,27 @@ describe('web settings page', () => {
     expect(calls.some((c) => c.url === '/api/auth/logout-all')).toBe(true);
     expect(seen).toEqual(['/login']);
   });
+
+  it('toasts saves and parks server sections as dummies', async () => {
+    stubApi((url, method) =>
+      url === '/api/settings' && method === 'GET'
+        ? { status: 200, json: SETTINGS }
+        : { status: 200, json: { ok: true } },
+    );
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    fireEvent.change(screen.getByPlaceholderText('New username'), { target: { value: 'ops2' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save username'));
+    });
+    expect(screen.getByRole('status').textContent).toBe('Username saved');
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save telegram'));
+    });
+    expect(screen.getByRole('status').textContent).toBe('Telegram saved');
+    expect(screen.getByText('CAND-030')).not.toBeNull();
+    expect(screen.getByText('CAND-031')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Export JSON' })).not.toBeNull();
+  });
 });

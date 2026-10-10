@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
+import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -13,10 +14,15 @@ export interface SettingsPageDeps {
 }
 
 /**
- * Settings (Terwo settings-tab parity): username display + version,
+ * Settings (mockup settings parity): username display + version,
  * change-username, change-password (client confirm check, field clear,
  * delayed login redirect), telegram form + save + test button,
- * dialog-gated logout-all.
+ * config export/copy, dialog-gated logout-all. Saved actions toast.
+ * Honestly omitted (no source, backend frozen): PBKDF2 rounds text and
+ * rehash-on-boot flag (the flag has no cryptographic effect and the
+ * mockup's 310k contradicts the real 120k — CAND-031 decision pending),
+ * device sessions table (CAND-030), bind controls + verified badge
+ * (CAND-031).
  */
 export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const goto =
@@ -38,6 +44,8 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [tg, setTg] = useState({ botToken: '', chatId: '', enabled: false, commandsEnabled: true });
   const [tgMessage, setTgMessage] = useState('');
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
+  const [toast, setToast] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -74,6 +82,7 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       });
       if (body.ok === true) {
         setNewUser('');
+        setToast('Username saved');
         await load();
       } else setUserError(typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
@@ -111,7 +120,8 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegram: tg }),
       });
-      if (body.ok !== true) setTgMessage(typeof body.error === 'string' ? body.error : 'Failed');
+      if (body.ok === true) setToast('Telegram saved');
+      else setTgMessage(typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
       setTgMessage(err instanceof ApiError ? err.message : 'Failed');
     }
@@ -124,6 +134,31 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       setTgMessage(body.ok === true ? 'Test message sent' : typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
       setTgMessage(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  /** Serialize the loaded panel config (client-side only, no endpoint). */
+  const configJson = (): string =>
+    JSON.stringify({ username, version, telegram: tg }, null, 2);
+
+  const exportConfig = (): void => {
+    if (typeof URL.createObjectURL !== 'function') return;
+    const blob = new Blob([configJson()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'olp-config.json';
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const copyConfig = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(configJson());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // clipboard blocked: export still works
     }
   };
 
@@ -144,6 +179,11 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         Logged in as <span className="font-medium text-neutral-200">{username}</span>
         {version !== '' && <span> · v{version}</span>}
       </p>
+      {toast !== '' && (
+        <p role="status" className="mb-3 text-sm text-emerald-400">
+          {toast}
+        </p>
+      )}
 
       <Card className="mb-3">
         <h2 className="mb-2 font-bold">Username</h2>
@@ -209,6 +249,22 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       <Button size="sm" variant="outline" onClick={() => void logoutAll()}>
         Log out all sessions
       </Button>
+      <div className="mt-3 flex flex-col gap-3">
+        <Card>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="mr-auto font-bold">Configuration</h2>
+            <Button size="sm" variant="outline" onClick={exportConfig}>
+              Export JSON
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void copyConfig()}>
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-neutral-500">Snapshots the loaded panel config, bot token included — store it safely.</p>
+        </Card>
+        <ComingSoon feature="Active device sessions" candidate="CAND-030" />
+        <ComingSoon feature="Server bind & bot status" candidate="CAND-031" />
+      </div>
       <ConfirmDialog
         open={confirmLogoutAll}
         title="Log out all sessions"
