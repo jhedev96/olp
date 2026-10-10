@@ -46,15 +46,21 @@ else
   git clone --depth 1 "$REPO_URL" "$TARGET_DIR"
 fi
 
-# 3. Dependencies (lockfile-committed; install fallback for dirty trees)
+# 3. Dependencies + build (lockfile-committed; install fallback for dirty trees).
+#    Full install first: the TypeScript build needs devDeps (@types, tsc).
+#    Pruned after the build for runtime footprint.
 echo "[3/5] Installing dependencies..."
 cd "$TARGET_DIR"
-if npm ci --omit=dev --no-audit --no-fund 2>/dev/null; then
+if npm ci --no-audit --no-fund 2>/dev/null; then
   echo "      Installed from lockfile."
 else
   echo "      Lockfile out of sync, falling back to npm install..."
-  npm install --omit=dev --no-audit --no-fund
+  npm install --no-audit --no-fund
 fi
+echo "      Building (packages before apps)..."
+npm run build
+echo "      Pruning dev dependencies..."
+npm prune --omit=dev --no-audit --no-fund
 
 # 4. Service setup via the olp CLI (launchd plist, best-effort — see ADR-003)
 echo "[4/5] Installing launchd service..."
