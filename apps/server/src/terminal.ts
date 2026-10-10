@@ -411,41 +411,46 @@ function messageToString(raw: unknown): string {
 }
 
 /**
- * Register `GET /term` (requires `@fastify/websocket`, registered here).
+ * Register `GET /term` (requires `@fastify/websocket`).
  * Upgrades without a valid session are closed immediately (Terwo parity).
- * The plugin is registered synchronously per `@fastify/websocket` docs;
- * readiness resolves at `listen()`/`inject()` time.
+ *
+ * The route lives in a child context registered AFTER the plugin
+ * (the `@fastify/websocket` README pattern): this guarantees the
+ * plugin's route hook transforms it even though `buildServer` stays
+ * synchronous (readiness still resolves at `listen()`/`inject()`).
  */
 export function registerTerminalRoutes(app: FastifyInstance, opts: TermRouteOptions): void {
   void app.register(websocketPlugin);
-  app.get('/term', { websocket: true }, (connection, req) => {
-    const socket = ((connection as unknown as { socket?: WsSocket }).socket ??
-      connection) as unknown as WsSocket;
-    const headers = req.headers as Record<string, string | undefined>;
-    if (!opts.validate(headers['cookie'])) {
-      try {
-        socket.close();
-      } catch {
-        // ignore close errors on rejected upgrades
+  void app.register(async (instance: FastifyInstance) => {
+    instance.get('/term', { websocket: true }, (connection, req) => {
+      const socket = ((connection as unknown as { socket?: WsSocket }).socket ??
+        connection) as unknown as WsSocket;
+      const headers = req.headers as Record<string, string | undefined>;
+      if (!opts.validate(headers['cookie'])) {
+        try {
+          socket.close();
+        } catch {
+          // ignore close errors on rejected upgrades
+        }
+        return;
       }
-      return;
-    }
-    let alive = true;
-    const client: TermClient = {
-      send: (data) => {
-        socket.send(data);
-      },
-      get open() {
-        return alive;
-      },
-    };
-    opts.manager.attach(client);
-    socket.on('message', (raw: unknown) => opts.manager.handle(client, messageToString(raw)));
-    const detach = (): void => {
-      alive = false;
-      opts.manager.detach(client);
-    };
-    socket.on('close', detach);
-    socket.on('error', detach);
+      let alive = true;
+      const client: TermClient = {
+        send: (data) => {
+          socket.send(data);
+        },
+        get open() {
+          return alive;
+        },
+      };
+      opts.manager.attach(client);
+      socket.on('message', (raw: unknown) => opts.manager.handle(client, messageToString(raw)));
+      const detach = (): void => {
+        alive = false;
+        opts.manager.detach(client);
+      };
+      socket.on('close', detach);
+      socket.on('error', detach);
+    });
   });
 }
