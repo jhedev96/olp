@@ -18,6 +18,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.6",
     "@fastify/websocket": "^11.3.4",
     "@olp/auth": "2.0.0-alpha.0",
     "@olp/env-core": "2.0.0-alpha.0",
