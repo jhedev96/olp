@@ -16,6 +16,7 @@ import {
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
 import { ConfirmDialog, PromptDialog } from '../components/common/Dialog.js';
+import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -39,6 +40,14 @@ export interface FileEntry {
   mtime: number;
 }
 
+/** One open editor tab (client-side only — no backend). */
+export interface EditorTab {
+  name: string;
+  content: string;
+}
+
+type SortKey = 'name' | 'size' | 'mtime';
+
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|ico)$/i;
 
 /** Read a browser File as base64 (upload path, Terwo FileReader parity). */
@@ -60,21 +69,30 @@ function isZip(name: string): boolean {
 }
 
 /**
- * File manager (Terwo files-tab parity): crumbs + up-row, per-type row
- * actions, dialog-driven mkdir/touch/rename, dialog-gated delete,
- * base64 upload, in-browser text editor modal, image preview modal.
+ * File manager (mockup file-manager parity): root card, search + sort,
+ * multi-select bulk bar, tabbed editor, per-type row actions, base64
+ * upload, image preview. Honestly omitted (no source, backend frozen):
+ * Chmod column + ACL card (CAND-016), wakelock card, CLI-jump chips
+ * (crumbs already cover fast navigation), symlink health (CAND-014);
+ * mounts/shortcuts ship as a Coming-Soon section (CAND-019).
  */
 export function FilesPage(): ReactElement {
   const [dir, setDir] = useState('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState('');
-  const [editor, setEditor] = useState<{ name: string; content: string } | null>(null);
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeTab, setActiveTab] = useState(0);
   const [editorError, setEditorError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [promptRename, setPromptRename] = useState<string | null>(null);
   const [promptTouch, setPromptTouch] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [query, setQuery] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [diskFree, setDiskFree] = useState<number | null>(null);
 
   const load = useCallback(async (target: string): Promise<void> => {
     setError('');
@@ -84,6 +102,7 @@ export function FilesPage(): ReactElement {
       );
       setDir(body.path);
       setEntries(body.entries);
+      setSelected([]);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load');
     }
@@ -92,6 +111,20 @@ export function FilesPage(): ReactElement {
   useEffect(() => {
     void load('');
   }, [load]);
+
+  useEffect(() => {
+    let alive = true;
+    void apiJson<{ disk?: { free?: unknown } }>('/api/stats', {}, { unauthorized: 'rethrow' })
+      .then((body) => {
+        if (alive && typeof body.disk?.free === 'number') setDiskFree(body.disk.free);
+      })
+      .catch(() => {
+        // root card keeps its placeholder without disk numbers
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     createIcons({ icons: ICONS });
@@ -127,6 +160,55 @@ export function FilesPage(): ReactElement {
     void runAction('/api/delete', { name });
   };
 
+  const confirmBulkRemove = async (): Promise<void> => {
+    const names = selected;
+    setPendingBulkDelete(false);
+    if (names.length === 0) return;
+    setError('');
+    setSelected([]);
+    try {
+      for (const name of names) {
+        await apiJson('/api/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: dir, name }),
+        });
+      }
+      await load(dir);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const bulkZip = async (): Promise<void> => {
+    const names = selected;
+    if (names.length === 0) return;
+    setError('');
+    setSelected([]);
+    try {
+      for (const name of names) {
+        await apiJson('/api/files/zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: dir === '' ? name : `${dir}/${name}` }),
+        });
+      }
+      await load(dir);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const bulkDownload = (): void => {
+    for (const name of selected) {
+      const entry = entries.find((e) => e.name === name);
+      if (entry === undefined || entry.type !== 'file') continue;
+      const anchor = document.createElement('a');
+      anchor.href = `/api/download?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`;
+      anchor.click();
+    }
+  };
+
   const rename = (name: string): void => {
     setPromptRename(name);
   };
@@ -145,6 +227,11 @@ export function FilesPage(): ReactElement {
   };
 
   const openEditor = async (name: string): Promise<void> => {
+    const existing = tabs.findIndex((t) => t.name === name);
+    if (existing !== -1) {
+      setActiveTab(existing);
+      return;
+    }
     setEditorError('');
     try {
       const body = await apiJson<{ ok?: unknown; content?: unknown; error?: string }>('/api/read', {
@@ -152,27 +239,34 @@ export function FilesPage(): ReactElement {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: dir, name }),
       });
-      if (typeof body.content === 'string') setEditor({ name, content: body.content });
-      else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
+      if (typeof body.content === 'string') {
+        setTabs((prev) => [...prev, { name, content: body.content as string }]);
+        setActiveTab(tabs.length);
+      } else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
       setEditorError(err instanceof ApiError ? err.message : 'Failed');
     }
   };
 
   const saveEditor = async (): Promise<void> => {
-    if (editor === null) return;
+    const tab = tabs[activeTab];
+    if (tab === undefined) return;
     setEditorError('');
     try {
       await apiJson('/api/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: dir, name: editor.name, content: editor.content }),
+        body: JSON.stringify({ path: dir, name: tab.name, content: tab.content }),
       });
-      setEditor(null);
       await load(dir);
     } catch (err) {
       setEditorError(err instanceof ApiError ? err.message : 'Failed');
     }
+  };
+
+  const closeTab = (index: number): void => {
+    setTabs((prev) => prev.filter((_, i) => i !== index));
+    setActiveTab((prev) => Math.max(0, Math.min(index < prev ? prev - 1 : prev, tabs.length - 2)));
   };
 
   const upload = async (file: File | undefined): Promise<void> => {
@@ -195,9 +289,40 @@ export function FilesPage(): ReactElement {
   const crumbs = dir === '' ? [] : dir.split('/');
   const crumbPath = (index: number): string => crumbs.slice(0, index + 1).join('/');
 
+  const visible = entries
+    .filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) => {
+      if (sortKey === 'name') return a.name.localeCompare(b.name);
+      if (sortKey === 'size') return a.size - b.size;
+      return a.mtime - b.mtime;
+    });
+
+  const folders = entries.filter((e) => e.type === 'dir').length;
+  const allVisible = visible.length > 0 && visible.every((e) => selected.includes(e.name));
+
+  const toggleSelect = (name: string): void => {
+    setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+  };
+
+  const toggleAll = (): void => {
+    setSelected(allVisible ? [] : visible.map((e) => e.name));
+  };
+
+  const tab = tabs[activeTab];
+
   return (
     <main className="p-4">
       <h1 className="mb-4 text-xl font-bold">Files</h1>
+      <Card className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <p>
+          <span className="text-neutral-400">Panel root: </span>
+          <span className="font-mono">/{dir}</span>
+        </p>
+        <p className="text-neutral-400">
+          {entries.length} items ({folders} folders, {entries.length - folders} files)
+        </p>
+        <p className="text-neutral-400">{diskFree === null ? 'disk —' : `disk free ${fmtSize(diskFree)}`}</p>
+      </Card>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input
           placeholder="New folder / file name"
@@ -236,7 +361,44 @@ export function FilesPage(): ReactElement {
             }}
           />
         </label>
+        <span className="flex-1" />
+        <Input
+          placeholder="Search files…"
+          aria-label="Search files"
+          value={query}
+          onChange={(ev) => setQuery(ev.target.value)}
+          className="w-44"
+        />
+        <select
+          aria-label="Sort entries"
+          className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+          value={sortKey}
+          onChange={(ev) => setSortKey(ev.target.value as SortKey)}
+        >
+          <option value="name">Name</option>
+          <option value="size">Size</option>
+          <option value="mtime">Modified</option>
+        </select>
       </div>
+      {selected.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm">
+          <span>
+            <strong>{selected.length}</strong> selected
+          </span>
+          <Button size="sm" variant="outline" onClick={() => void bulkZip()}>
+            Zip {selected.length}
+          </Button>
+          <Button size="sm" variant="outline" onClick={bulkDownload}>
+            Download
+          </Button>
+          <Button size="sm" variant="destructive" onClick={() => setPendingBulkDelete(true)}>
+            Delete {selected.length}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected([])}>
+            Clear
+          </Button>
+        </div>
+      )}
       {error !== '' && (
         <p role="alert" className="mb-3 text-sm text-red-400">
           {error}
@@ -260,15 +422,32 @@ export function FilesPage(): ReactElement {
           <tbody>
             {dir !== '' && (
               <tr>
-                <td colSpan={4}>
+                <td colSpan={5}>
                   <button type="button" onClick={up}>
                     <Icon name="arrow-up" label="Up" /> ..
                   </button>
                 </td>
               </tr>
             )}
-            {entries.map((entry) => (
+            <tr className="text-xs text-neutral-500">
+              <td className="w-8">
+                <input type="checkbox" aria-label="Select all" checked={allVisible} onChange={toggleAll} />
+              </td>
+              <td>Name</td>
+              <td>Size</td>
+              <td>Modified</td>
+              <td>Actions</td>
+            </tr>
+            {visible.map((entry) => (
               <tr key={entry.name}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${entry.name}`}
+                    checked={selected.includes(entry.name)}
+                    onChange={() => toggleSelect(entry.name)}
+                  />
+                </td>
                 <td>
                   {entry.type === 'dir' ? (
                     <button
@@ -332,35 +511,63 @@ export function FilesPage(): ReactElement {
                 </td>
               </tr>
             ))}
-            {entries.length === 0 && (
+            {visible.length === 0 && (
               <tr>
-                <td colSpan={4} className="text-neutral-400">
-                  Empty folder
+                <td colSpan={5} className="text-neutral-400">
+                  {entries.length === 0 ? 'Empty folder' : 'No matches'}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </Card>
-      {editor !== null && (
+      <div className="mt-3">
+        <ComingSoon feature="Storage mounts & shortcuts" candidate="CAND-019" />
+      </div>
+      {tabs.length > 0 && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-            <h2 className="mb-2 font-bold">{editor.name}</h2>
+          <div className="flex max-h-full w-full max-w-2xl flex-col rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+            <div className="mb-2 flex flex-wrap gap-1" role="tablist" aria-label="Open files">
+              {tabs.map((t, i) => (
+                <span
+                  key={t.name}
+                  role="tab"
+                  aria-selected={i === activeTab}
+                  className={
+                    i === activeTab
+                      ? 'flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 font-mono text-xs text-emerald-300'
+                      : 'flex items-center gap-1 rounded-md px-2 py-1 font-mono text-xs text-neutral-400 hover:bg-neutral-800'
+                  }
+                >
+                  <button type="button" onClick={() => setActiveTab(i)}>
+                    {t.name}
+                  </button>
+                  <button type="button" aria-label={`Close ${t.name}`} className="hover:text-red-400" onClick={() => closeTab(i)}>
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
             {editorError !== '' && (
               <p role="alert" className="mb-2 text-sm text-red-400">
                 {editorError}
               </p>
             )}
-            <textarea
-              className="h-64 w-full rounded border border-neutral-700 bg-transparent p-2 font-mono text-sm"
-              value={editor.content}
-              onChange={(ev) => setEditor({ name: editor.name, content: ev.target.value })}
-            />
+            {tab !== undefined && (
+              <textarea
+                aria-label={`Edit ${tab.name}`}
+                className="h-64 w-full rounded border border-neutral-700 bg-transparent p-2 font-mono text-sm"
+                value={tab.content}
+                onChange={(ev) =>
+                  setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: ev.target.value } : t)))
+                }
+              />
+            )}
             <div className="mt-2 flex gap-2">
               <Button size="sm" onClick={() => void saveEditor()}>
                 Save
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setEditor(null)}>
+              <Button size="sm" variant="outline" onClick={() => closeTab(activeTab)}>
                 Close
               </Button>
             </div>
@@ -375,6 +582,15 @@ export function FilesPage(): ReactElement {
         destructive={true}
         onConfirm={confirmRemove}
         onCancel={() => setPendingDelete(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulkDelete}
+        title="Delete selected"
+        message={`Delete ${selected.length} selected items? This cannot be undone.`}
+        confirmLabel={`Delete ${selected.length}`}
+        destructive={true}
+        onConfirm={() => void confirmBulkRemove()}
+        onCancel={() => setPendingBulkDelete(false)}
       />
       <PromptDialog
         open={promptRename !== null}
