@@ -31,7 +31,7 @@ export function wsUrl(path: string): string; // http(s) → ws(s) + path
 export function fmtSize(n: number): string;   // B/KB/MB/GB (Terwo parity)
 export function fmtDate(ms: number): string;  // en-US locale (Terwo parity)
 export function fmtUptime(sec: number): string;
-export function esc(s: unknown): string;      // HTML-escape (XSSllis, Terwo parity)
+export function esc(s: unknown): string;      // HTML-escape (XSS guard, Terwo parity; React auto-escapes JSX — esc stays for the rare dangerouslySetInnerHTML case, which needs a comment justifying it)
 
 // apps/web/src/lib/router.ts
 export type Slug = 'login' | 'dashboard' | 'website' | 'database' | 'files' | 'cron' | 'backup' | 'settings' | 'terminal' | 'store';
@@ -95,20 +95,26 @@ test/                     # mirror of src for unit tests (format, router, api, t
 
 ## 5. Code Style
 
-```ts
-// Good: typed page modules with explicit mount/unmount (pollers cleaned up).
-export interface Page { mount(root: HTMLElement): void; unmount(): void }
-export function DashboardPage(): Page { /* fetches /api/stats, 5 s poll, clears on unmount */ }
+```tsx
+// Good: function components, hooks for data, cleanup in effects.
+export function DashboardPage(): JSX.Element {
+  const [stats, setStats] = useState<SystemStats | null>(null);
+  useEffect(() => { const t = setInterval(refresh, 5000); refresh(); return () => clearInterval(t); }, []);
+  // ...
+}
 ```
 
-- No `any`; no direct `fetch` outside `lib/api.ts`; no `innerHTML`
-  without `esc()` on interpolated data (grep-enforceable in review);
+- No `any`; no direct `fetch` outside `lib/api.ts`; React auto-escapes
+  JSX — `dangerouslySetInnerHTML` is banned without a justifying comment;
   English comments/JSDoc.
 
 ## 6. Testing Strategy
 
-- Framework: Vitest (devDep, jsdom-free — pure logic only; DOM pages
-  tested via injected fakes where cheap, else manual smoke).
+- Framework: Vitest + jsdom + `@testing-library/react` (user-visible
+  behavior: render, type, click, assert). Pure lib stays DOM-free tested.
+- Cases: lib vectors (existing); per page: renders fields, submits the
+  right payload (mocked `fetch`), shows server errors, navigates on
+  success, cleans up timers/sockets on unmount.
 - Cases: format vectors (B/KB/MB/GB boundaries, en-US date, uptime);
   router slug mapping + unknown fallback; api wrapper 401-redirect +
   JSON parse + network-error passthrough (mocked `fetch`); theme
@@ -144,8 +150,15 @@ export function DashboardPage(): Page { /* fetches /api/stats, 5 s poll, clears 
 
 ## 10. Decisions
 
-- Vanilla TS, no framework (parity with Terwo's dependency-free UI;
-  revisit only with measured pain).
+- ~~Vanilla TS, no framework (parity with Terwo's dependency-free UI;
+  revisit only with measured pain).~~ REVISED 2026-10-10: **React + Vite
+  + Tailwind v4 + shadcn-style primitives** (see below). Rationale:
+  shadcn is React-first (Svelte/Vue ports are second-class); agents write
+  modern React+TS most reliably; 9 admin pages of forms/tables/dialogs are
+  shadcn's sweet spot; per-route `React.lazy` keeps phone load small.
+  The mini slug router stays (TanStack Router rejected as ceremony for 10
+  flat slugs — revisit only if routes nest). `lib/api/format/router/theme`
+  survive unchanged (pure functions).
 - `lucide` + `xterm` via npm (kill `public/vendor/`).
 
 ## 11. Parity mapping (§9.2)
