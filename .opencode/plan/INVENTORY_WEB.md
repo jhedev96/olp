@@ -37,8 +37,8 @@ Theme system:
 | Screen (folder) | Components | Features → verdict |
 |---|---|---|
 | `terwo_login_auth_gateway` (+mobile) | LoginPage restyle | TBD P0 (form exists; rebrand + shell-less layout) |
-| `terwo_dashboard_revisi` (+mobile, +light) | Dashboard restyle, ServicesDaemons, StorePreview | TBD P0 (cards real; services → CAND-005) |
-| `terwo_system_monitor_hardware_telemetry` (+mobile activity) | MonitorPage (new `/monitor`), CpuWave, Donut, NetPanel, ProcTable | Mostly CAND-001..004; exact split TBD P0 |
+| `terwo_dashboard_revisi` (+mobile, +light) | Dashboard restyle, ServicesDaemons, StorePreview, LiveLog | Cards: real (loadavg/cores/mem/disk/battery/uptime all exist); extras → dummies: CPU temp, per-core freq, ZRAM/swap, disk FS type, battery temp/wakelock/power, PM2 badge, per-site memory+engine version, open-site links real; header buttons: restart-panel → CAND-015, web-terminal/new-website real (navigate); LiveLog panel → CAND-013; Services section → CAND-005; StorePreview real (26 items) |
+| `terwo_system_monitor_hardware_telemetry` (+mobile activity) | MonitorPage (`/monitor`), CpuWave, Donut, NetPanel, ProcTable | Mostly dummy: CPU cluster card mixed (model/kernel/arch/wakelock → CAND-014, uptime real); per-cluster wave → CAND-014 + frontend history buffer; donut segments → CAND-014; disk rates → CAND-014; network ifaces/sockets → CAND-002; proc table + restart → CAND-001; kill → CAND-004; refresh cadence/pause/export → real (client-side); top Kill Task → verify P0 (likely scroll action, else CAND-004) |
 | `terwo_file_manager_code_editor` (+mobile) | Files restyle, EditorModal | TBD P0 (CRUD real) |
 | `terwo_terminal_emulator` (+mobile) | Terminal restyle | TBD P0 (WS exists; keymap parity check) |
 | `terwo_websites_reverse_proxy` (+mobile, +add modal) | Sites restyle, DeployModal, ProxySection | TBD P0 (CRUD real) |
