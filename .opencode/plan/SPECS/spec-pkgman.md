@@ -29,13 +29,15 @@ export interface CatalogItem {
   id: string; name: string; desc: string;
   check?: string;              // shell probe (default `command -v <bin> …`)
   bin?: string;
-  forcedInstalled?: boolean;   // e.g. nodejs on Termux/known-good hosts
+  checks?: Partial<Record<EnvId, string>>; // per-env probe override (e.g. debian `python`→`python3`)
+  forcedEnvs?: readonly EnvId[]; // assumed present here (probe skipped; e.g. nodejs on Termux)
   install: Partial<Record<EnvId, string>>; // missing env → unavailable
 }
 export const CATALOG: readonly CatalogItem[];
 export function itemById(id: string): CatalogItem | undefined;
+export function isForced(item: CatalogItem, env: EnvId): boolean;
 export function installCommand(item: CatalogItem, env: EnvId): { ok: true; cmd: string } | { ok: false; reason: string };
-export function checkCommand(item: CatalogItem): string;
+export function checkCommand(item: CatalogItem, env: EnvId): string | null; // null when forced
 
 // apps/server/src/store.ts
 export interface InstallRun { logs: string[]; running: boolean; exitCode: number | null }
@@ -60,15 +62,16 @@ export function registerStoreRoutes(app: FastifyInstance, opts: StoreOptions): v
   returns `{ok:false, reason:'Install command unavailable for <env> (<id>)'}`.
   Absent cells are tracked as `tbd-verify`, never guessed at runtime.
 - `termux-api` is Termux-only (absent elsewhere); `bun` keeps its upstream
-  installer with the known Android caveat in `desc`; `nodejs` keeps
-  `forcedInstalled` on Termux only (elsewhere it resolves per env).
+  installer with the known Android caveat tracked tbd-verify; `nodejs` is
+  forced (probe skipped) on Termux only via `forcedEnvs` (elsewhere it
+  resolves per env).
 - Debian/Ubuntu Node.js resolves to the NodeSource 22.x setup pipeline
   (ADR-001); commands are sudo-free (privilege model is an open question —
   same single-user philosophy as Terwo: the server runs as a user that can
   install).
-- List: per item, `installed` = `forcedInstalled || await check(checkCommand)`
-  (8 s timeout, false on error); `installing` from the runs map. Shape
-  `{items}` identical to Terwo.
+- List: per item, `installed` = forced on env (`checkCommand` null counts as
+  installed) or `await check(checkCommand)` (8 s timeout, false on error);
+  `installing` from the runs map. Shape `{items}` identical to Terwo.
 - Start: unknown id → 400 `Unknown package`; running → 400 `Installation
   already running`; unavailable env/package → 400 reason; else spawn
   `bash -c <cmd>` with `cwd: home`, push `$ <cmd>\n` first, ring-trim 500,
