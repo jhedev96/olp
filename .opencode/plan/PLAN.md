@@ -117,7 +117,7 @@ Follow-up plan (out of scope here): Windows-native full support.
 
 ## 7. Open Research (feeds ADRs, does not block Phase 1 skeleton)
 
-- Node minimum version (candidate 20 LTS) — Phase 0 ADR.
+- Node minimum version — locked per ADR-001: `>=22.12` (Node 24 preferred for fresh installs).
 - npm vs pnpm workspaces.
 - argon2id upgrade timing.
 - Caddy evaluation (post-v2.0).
