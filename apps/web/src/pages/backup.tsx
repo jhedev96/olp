@@ -1,0 +1,145 @@
+import { useCallback, useEffect, useState } from 'react';
+import type { ReactElement } from 'react';
+import { ApiError, apiJson } from '../lib/api.js';
+import { fmtSize } from '../lib/format.js';
+import { Button } from '../components/ui/button.js';
+import { Card } from '../components/ui/card.js';
+import { Input } from '../components/ui/input.js';
+
+/** `/api/backups` row shape (server contract). */
+export interface BackupRow {
+  name: string;
+  file: string;
+  type: 'folder' | 'mysql' | 'postgres';
+  source: string;
+  size: number;
+  mtime: number;
+  created: number;
+}
+
+const BACKUP_TYPES = ['folder', 'mysql', 'postgres'] as const;
+
+/**
+ * Backups (Terwo backup-tab parity): create form (name/type/source),
+ * table with download/restore/delete, confirm-gated destructive actions.
+ * Restore uses the stored default target (empty body, Terwo parity).
+ */
+export function BackupPage(): ReactElement {
+  const [backups, setBackups] = useState<BackupRow[]>([]);
+  const [form, setForm] = useState({ name: '', type: 'folder', source: '' });
+  const [error, setError] = useState('');
+
+  const load = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ backups?: BackupRow[] }>('/api/backups');
+      setBackups(Array.isArray(body.backups) ? body.backups : []);
+    } catch {
+      // keep the previous render (Terwo parity)
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (): Promise<void> => {
+    setError('');
+    try {
+      const body = await apiJson<{ ok?: unknown; error?: string }>('/api/backups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name.trim(), type: form.type, source: form.source.trim() }),
+      });
+      if (body.ok === true) {
+        setForm({ name: '', type: 'folder', source: '' });
+        await load();
+      } else setError(typeof body.error === 'string' ? body.error : 'Failed');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const restore = async (backup: BackupRow): Promise<void> => {
+    if (!window.confirm(`Restore backup "${backup.name}"? Current files may be overwritten.`)) return;
+    await apiJson(`/api/backups/${encodeURIComponent(backup.name)}/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }).catch(() => undefined);
+    await load();
+  };
+
+  const remove = async (backup: BackupRow): Promise<void> => {
+    if (!window.confirm(`Delete backup "${backup.name}"? This cannot be undone.`)) return;
+    await apiJson(`/api/backups/${encodeURIComponent(backup.name)}`, { method: 'DELETE' }).catch(() => undefined);
+    await load();
+  };
+
+  return (
+    <main className="p-4">
+      <h1 className="mb-4 text-xl font-bold">Backups</h1>
+      {error !== '' && (
+        <p role="alert" className="mb-2 text-sm text-red-400">
+          {error}
+        </p>
+      )}
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <Input placeholder="Backup name (optional)" value={form.name} onChange={(ev) => setForm({ ...form, name: ev.target.value })} className="w-52" />
+        <select
+          aria-label="Backup type"
+          className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+          value={form.type}
+          onChange={(ev) => setForm({ ...form, type: ev.target.value })}
+        >
+          {BACKUP_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </select>
+        <Input
+          placeholder={form.type === 'folder' ? 'Folder path (empty = root)' : 'Database name'}
+          value={form.source}
+          onChange={(ev) => setForm({ ...form, source: ev.target.value })}
+          className="w-64"
+        />
+        <Button size="sm" onClick={() => void save()}>
+          Create backup
+        </Button>
+      </div>
+      <Card className="p-0">
+        <table className="w-full text-sm">
+          <tbody>
+            {backups.length === 0 ? (
+              <tr>
+                <td className="text-neutral-400">No backups yet</td>
+              </tr>
+            ) : (
+              backups.map((backup) => (
+                <tr key={backup.name}>
+                  <td>{backup.name}</td>
+                  <td className="text-neutral-400">{backup.type}</td>
+                  <td className="font-mono text-xs text-neutral-400">{backup.source === '' ? '—' : backup.source}</td>
+                  <td className="text-neutral-400">{fmtSize(backup.size)}</td>
+                  <td>
+                    <div className="flex gap-1">
+                      <a className="text-xs text-green-400" href={`/api/backups/${encodeURIComponent(backup.name)}/download`}>
+                        Download
+                      </a>
+                      <Button size="sm" variant="outline" onClick={() => void restore(backup)}>
+                        Restore
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => void remove(backup)}>
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </Card>
+    </main>
+  );
+}
