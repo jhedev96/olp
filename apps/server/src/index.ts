@@ -10,12 +10,16 @@ import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
 import { nodeDeps, registerStatsRoutes } from './stats.js';
 import { registerFilesRoutes } from './files.js';
+import { TerminalManager, realBackendFactory, registerTerminalRoutes } from './terminal.js';
+import type { TermBackendFactory } from './terminal.js';
+import { sessionTokenFromHeader } from '@olp/auth';
 
 /** Configured server plus its auth state (routes mutate `auth`). */
 export interface ServerHandle {
   app: FastifyInstance;
   auth: AuthContext;
   env: Environment;
+  terminal: TerminalManager;
 }
 
 /** Injectable server inputs (tests pass fakes; production uses defaults). */
@@ -25,6 +29,7 @@ export interface ServerOptions {
   env?: Environment;
   sysDeps?: SysDeps;
   root?: string;
+  termFactory?: TermBackendFactory;
 }
 
 /**
@@ -54,11 +59,21 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
+  const terminal = new TerminalManager({
+    shell: process.env['SHELL'] ?? env.shell ?? 'sh',
+    cwd: root,
+    env: process.env,
+    factory: opts.termFactory ?? realBackendFactory(),
+  });
+  registerTerminalRoutes(app, {
+    manager: terminal,
+    validate: (header) => auth.store.validate(sessionTokenFromHeader(header)),
+  });
   app.setErrorHandler(async (err: Error, _req: FastifyRequest, reply: FastifyReply) => {
     reply.code(400);
     await reply.send({ error: err.message || 'Failed' });
   });
-  return { app, auth, env };
+  return { app, auth, env, terminal };
 }
 
 /**
