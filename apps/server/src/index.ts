@@ -29,6 +29,8 @@ import { fileSettingsStore, registerSettingsRoutes } from './settings.js';
 import type { SettingsStore } from './settings.js';
 import { TelegramBot, nodeTelegramApi } from './telegram.js';
 import type { BotStatus, TelegramApi } from './telegram.js';
+import { createWatchdog, nodeProbe } from './watchdog.js';
+import type { WatchdogProbe } from './watchdog.js';
 import { getSystemInfo } from '@olp/sysinfo';
 import { sessionTokenFromHeader } from '@olp/auth';
 
@@ -42,6 +44,7 @@ export interface ServerHandle {
   env: Environment;
   terminal: TerminalManager;
   telegram: { bot: TelegramBot; startPoller: () => void; stopPoller: () => void };
+  watchdog: { checkOnce: () => Promise<void> };
 }
 
 /** Injectable server inputs (tests pass fakes; production uses defaults). */
@@ -66,6 +69,7 @@ export interface ServerOptions {
   storeNotify?: (text: string) => void;
   settingsStore?: SettingsStore;
   telegramApi?: TelegramApi;
+  watchdogProbe?: WatchdogProbe;
 }
 
 /**
@@ -190,6 +194,18 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     },
     testSend: (tg) => telegramApi.sendMessage(tg.botToken, tg.chatId, 'OLP notification test successful!'),
   });
+  const siteWatcher = (): Array<{ id: string; name: string; port: number; running: boolean }> =>
+    siteStore.list().map((site) => ({
+      id: site.id,
+      name: site.name,
+      port: site.port,
+      running: siteRuntime.running.has(site.id),
+    }));
+  const watchdog = createWatchdog({
+    sites: siteWatcher,
+    probe: opts.watchdogProbe ?? nodeProbe(),
+    notify: notifyTelegram,
+  });
   registerStoreRoutes(app, {
     env: env.id,
     home: homedir(),
@@ -211,7 +227,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     reply.code(400);
     await reply.send({ error: err.message || 'Failed' });
   });
-  return { app, auth, env, terminal, telegram: { bot, startPoller, stopPoller } };
+  return { app, auth, env, terminal, telegram: { bot, startPoller, stopPoller }, watchdog };
 }
 
 /**
@@ -222,7 +238,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
 async function main(): Promise<void> {
   const port = Number.parseInt(process.env['PANEL_PORT'] ?? '8080', 10);
   const host = process.env['PANEL_HOST'] ?? '127.0.0.1';
-  const { app, auth, telegram } = buildServer();
+  const { app, auth, telegram, watchdog } = buildServer();
   if (auth.created && auth.plaintextPassword !== undefined) {
     // eslint-disable-next-line no-console
     console.log(
@@ -233,6 +249,12 @@ async function main(): Promise<void> {
     auth.store.prune();
   }, 3600 * 1000).unref();
   telegram.startPoller();
+  setInterval(() => {
+    watchdog.checkOnce().catch((err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.log('Health check failed:', err instanceof Error ? err.message : String(err));
+    });
+  }, 60000).unref();
   await app.listen({ port, host });
   // eslint-disable-next-line no-console
   console.log(`OLP listening on http://${host}:${port}`);
