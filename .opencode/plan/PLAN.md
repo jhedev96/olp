@@ -38,7 +38,7 @@ olp/                          # new monorepo root (sibling of terwo/ during migr
   docs/                       # README per OS + migration guide
 ```
 
-Tooling: `pnpm` or `npm` workspaces (decide in Phase 1), ESLint + Prettier, Vitest, `tsx` for dev, `tsc` build.
+Tooling: npm workspaces (locked per ADR-002; pnpm opt-in for non-Termux contributors), ESLint + Prettier, Vitest, `tsx` for dev, `tsc` build.
 
 ## 2. Phases
 
@@ -118,6 +118,6 @@ Follow-up plan (out of scope here): Windows-native full support.
 ## 7. Open Research (feeds ADRs, does not block Phase 1 skeleton)
 
 - Node minimum version — locked per ADR-001: `>=22.12` (Node 24 preferred for fresh installs).
-- npm vs pnpm workspaces.
+- Workspace tool — locked per ADR-002: npm workspaces canonical, pnpm opt-in.
 - argon2id upgrade timing.
 - Caddy evaluation (post-v2.0).
