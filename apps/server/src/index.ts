@@ -31,6 +31,7 @@ import { TelegramBot, nodeTelegramApi } from './telegram.js';
 import type { BotStatus, TelegramApi } from './telegram.js';
 import { createWatchdog, nodeProbe } from './watchdog.js';
 import type { WatchdogProbe } from './watchdog.js';
+import { registerStaticRoutes, resolveDistDir } from './static.js';
 import { getSystemInfo } from '@olp/sysinfo';
 import { sessionTokenFromHeader } from '@olp/auth';
 
@@ -70,6 +71,8 @@ export interface ServerOptions {
   settingsStore?: SettingsStore;
   telegramApi?: TelegramApi;
   watchdogProbe?: WatchdogProbe;
+  /** Web `dist` dir override; `null` forces API-only mode (tests). */
+  webDir?: string | null;
 }
 
 /**
@@ -221,6 +224,11 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   });
   registerTerminalRoutes(app, {
     manager: terminal,
+    validate: (header) => auth.store.validate(sessionTokenFromHeader(header)),
+  });
+  const webDir = opts.webDir === undefined ? resolveDistDir() : opts.webDir;
+  registerStaticRoutes(app, {
+    distDir: webDir ?? undefined,
     validate: (header) => auth.store.validate(sessionTokenFromHeader(header)),
   });
   app.setErrorHandler(async (err: Error, _req: FastifyRequest, reply: FastifyReply) => {
