@@ -171,7 +171,7 @@ async function mustBin(sys: BackupSystem, bin: string, message: string): Promise
 function mysqlCommand(cfg: DbConfig, tool: 'mysqldump' | 'mysql', db: string, file: string, direction: '>' | '<'): string {
   const pw = cfg.password === '' ? '' : ` --password=${quote(cfg.password)}`;
   return (
-    `${tool} -h ${quote(cfg.host)} -P ${cfg.port} -u ${quote(cfg.user)}${pw} ` +
+    `${tool} -h ${quote(cfg.host)} -P ${quote(cfg.port)} -u ${quote(cfg.user)}${pw} ` +
     `${quote(db)} ${direction} ${quote(file)}`
   );
 }

@@ -17,7 +17,7 @@ import type { SiteSpawner, SiteStore } from './sites.js';
 import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
 import type { ProxyStore, ProxySystem } from './proxy.js';
 import { fileRegistry, mysqlDriver, normalizeConfig, pgDriver, registerDatabaseRoutes } from './database.js';
-import type { DbDriver, DbEngine, DbRegistry } from './database.js';
+import type { DbConfig, DbDriver, DbEngine, DbRegistry } from './database.js';
 import { nodeBackupSys, registerBackupRoutes } from './backup.js';
 import type { BackupSystem } from './backup.js';
 import { nodeCronBackend, registerCronRoutes } from './cron.js';
@@ -49,6 +49,7 @@ export interface ServerOptions {
   dbRegistry?: DbRegistry;
   dbDrivers?: Record<DbEngine, DbDriver>;
   backupSys?: BackupSystem;
+  backupDbConfig?: (engine: 'mysql' | 'postgres') => DbConfig;
   cronBackend?: CronBackend;
   storeCheck?: (cmd: string) => Promise<boolean>;
   storeSpawn?: SpawnShell;
@@ -103,7 +104,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     dataDir: auth.dataDir,
     root,
     sys: opts.backupSys ?? nodeBackupSys(),
-    dbConfig: (engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>),
+    dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
   });
   registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend() });
   registerStoreRoutes(app, {
