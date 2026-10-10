@@ -1,6 +1,14 @@
 @import "tailwindcss";
 
-/* OLP theme tokens (dark-first, Terwo palette parity: neutral dark + green accent). */
+/* OLP theme tokens (dark-first, mockup palette parity: abyss surfaces + emerald brand). */
+@theme {
+  --color-surface: #0c1324;
+  --color-surface-low: #151b2d;
+  --color-surface-lowest: #070d1f;
+  --color-brand: #4edea3;
+  --color-brand-dim: #10b981;
+}
+
 :root {
   color-scheme: dark;
 }
