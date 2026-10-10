@@ -54,7 +54,15 @@
 7.2. Agents prefer specialized file tools over shell for edits; verify edited regions before finishing.
 7.3. Agents do not expand scope beyond the active task. New needs go to Open Questions or a new task.
 
-## 8. Change Process for These Rules
+## 8. Prioritization & Recommendations
+
+8.1. When the user asks what to work on next — or says "gas" without naming a task — the agent MUST recommend an order before acting: list the candidate tasks with a one-line rationale each, name its top pick with `(Recommended)`, and explain why in one or two sentences.
+8.2. Proceed only after human approval, unless the human pre-authorized the choice ("gas with your choice" or equivalent). In that case, state the pick and its rationale, then proceed.
+8.3. Ground recommendations in this order: (a) dependency direction — unblock other work first (e.g. `env-core` before all OS ports); (b) plan order — follow `PLAN.md` phases and the port sequence unless there is a reason to deviate (state it); (c) risk reduction — tackle the riskiest module early while context is fresh (e.g. terminal pty/pipe); (d) uncertainty — do well-understood work before speculative work; (e) visible progress — prefer a user-facing win when all else is equal.
+8.4. Record the chosen order and its rationale where the next agent will find it: a line in `TODOS.md` or the task commit message. Any agent (human or AI) picking up this project later must be able to reconstruct why this order was chosen without asking again.
+8.5. Recommending an order never authorizes batching: one task = one local commit still holds. Recommend the sequence, execute one task at a time.
+
+## 9. Change Process for These Rules
 
 - Propose additions as: rule text (English) + rationale + example. They take effect once the user approves and this file is committed.
 - Candidate future rules (not yet active): coverage threshold, performance budgets per route, ADR requirement for new dependencies.
