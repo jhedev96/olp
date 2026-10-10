@@ -15,9 +15,9 @@ export interface StorageLike {
   setItem(key: string, value: string): void;
 }
 
-/** Minimal document surface for the theme attribute. */
+/** Minimal document surface for the theme class. */
 export interface DocumentLike {
-  documentElement: { dataset: Record<string, string | undefined> };
+  documentElement: { classList: { toggle(token: string, force?: boolean): void } };
 }
 
 /** Read the theme: new key, then legacy key, then dark default. */
@@ -26,12 +26,12 @@ export function getTheme(storage: StorageLike = localStorage): Theme {
   return value === 'light' || value === 'dark' ? value : 'dark';
 }
 
-/** Persist the theme and reflect it on `<html data-theme>`. */
+/** Persist the theme and reflect it via `<html class="light">` (Terwo parity). */
 export function setTheme(
   theme: Theme,
   storage: StorageLike = localStorage,
   doc: DocumentLike = document,
 ): void {
   storage.setItem(KEY, theme);
-  doc.documentElement.dataset['theme'] = theme;
+  doc.documentElement.classList.toggle('light', theme === 'light');
 }

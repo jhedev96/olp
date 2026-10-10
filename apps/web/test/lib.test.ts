@@ -25,11 +25,17 @@ function memStorage(initial: Record<string, string> = {}): StorageLike & { data:
   };
 }
 
-function memDocument(): DocumentLike & { theme(): string | undefined } {
-  const dataset: Record<string, string | undefined> = {};
+function memDocument(): DocumentLike & { light(): boolean | undefined } {
+  let light: boolean | undefined;
   return {
-    documentElement: { dataset },
-    theme: () => dataset['theme'],
+    documentElement: {
+      classList: {
+        toggle: (_token: string, force?: boolean) => {
+          light = force;
+        },
+      },
+    },
+    light: () => light,
   };
 }
 
@@ -133,6 +139,8 @@ describe('web lib/theme', () => {
     setTheme('dark', storage, doc);
     expect(storage.data['olp-theme']).toBe('dark');
     expect(storage.data['terwo-theme']).toBe('light');
-    expect(doc.theme()).toBe('dark');
+    expect(doc.light()).toBe(false);
+    setTheme('light', storage, doc);
+    expect(doc.light()).toBe(true);
   });
 });
