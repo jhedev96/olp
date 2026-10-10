@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { navigateTo } from '../lib/router.js';
+import { Badge } from '../components/common/Badge.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
@@ -19,6 +21,8 @@ export interface SiteRow {
 type SiteType = SiteRow['type'];
 const SITE_TYPES: SiteType[] = ['node', 'php', 'static', 'go'];
 
+type StatusFilter = 'all' | 'running' | 'stopped';
+
 /** Proxy row shape (server contract). */
 export interface ProxyRow {
   id: string;
@@ -29,14 +33,20 @@ export interface ProxyRow {
 }
 
 /**
- * Websites + Nginx reverse proxies (Terwo website-tab parity): type tabs,
- * add modal, start/stop/restart/log/delete, log modal, nginx service
- * buttons, proxy form + delete. List failures keep the previous render;
- * destructive actions are dialog-gated (two-step open-confirm).
+ * Websites + Nginx reverse proxies (mockup websites parity): type tabs,
+ * search + status filter, app cards with open-links, engine-card add
+ * modal, nginx service buttons, proxy form + table. Honestly omitted
+ * (no source, backend frozen): per-site engine version, PID, CPU/memory
+ * (CAND-015), auto-restart toggle (CAND-020), per-site settings button
+ * (no destination page exists), per-vhost SSL/toggles/conf edit/stats
+ * (CAND-021), free-port probe (CAND-022), custom startup command
+ * (CAND-023). List failures keep the previous render.
  */
 export function SitesPage(): ReactElement {
   const [sites, setSites] = useState<SiteRow[]>([]);
   const [siteType, setSiteType] = useState<SiteType>('node');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [query, setQuery] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: '', path: '', port: '' });
   const [formError, setFormError] = useState('');
@@ -170,70 +180,103 @@ export function SitesPage(): ReactElement {
     await loadNginx();
   };
 
-  const visible = sites.filter((s) => s.type === siteType);
+  const q = query.trim().toLowerCase();
+  const visible = sites.filter(
+    (s) =>
+      s.type === siteType &&
+      (statusFilter === 'all' || (statusFilter === 'running') === s.running) &&
+      (q === '' || s.name.toLowerCase().includes(q) || s.path.toLowerCase().includes(q)),
+  );
+  const online = sites.filter((s) => s.running).length;
+  const siteHost = typeof window === 'undefined' ? '' : window.location.hostname;
 
   return (
     <main className="p-4">
-      <h1 className="mb-4 text-xl font-bold">Websites</h1>
-      <div className="mb-3 flex gap-1">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <h1 className="mr-auto text-xl font-bold">Websites</h1>
+        <span className="text-xs text-neutral-400">
+          {online} online · {sites.length - online} stopped · {proxies.length} proxies
+        </span>
+        <Button size="sm" onClick={() => { setFormError(''); setShowAdd(true); }}>
+          Add ({siteType})
+        </Button>
+      </div>
+      <div className="mb-3 flex flex-wrap gap-1">
         {SITE_TYPES.map((type) => (
           <Button key={type} size="sm" variant={siteType === type ? 'default' : 'outline'} onClick={() => setSiteType(type)}>
             {type}
           </Button>
         ))}
         <span className="flex-1" />
-        <Button size="sm" onClick={() => { setFormError(''); setShowAdd(true); }}>
-          Add ({siteType})
-        </Button>
+        <Input
+          placeholder="Search sites…"
+          aria-label="Search sites"
+          value={query}
+          onChange={(ev) => setQuery(ev.target.value)}
+          className="w-44"
+        />
+        <select
+          aria-label="Filter status"
+          className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+          value={statusFilter}
+          onChange={(ev) => setStatusFilter(ev.target.value as StatusFilter)}
+        >
+          <option value="all">All status</option>
+          <option value="running">Running</option>
+          <option value="stopped">Stopped</option>
+        </select>
       </div>
-      <Card className="p-0">
-        <table className="w-full text-sm">
-          <tbody>
-            {visible.length === 0 ? (
-              <tr>
-                <td className="text-neutral-400">No {siteType} websites yet</td>
-              </tr>
-            ) : (
-              visible.map((site) => (
-                <tr key={site.id}>
-                  <td>{site.name}</td>
-                  <td className="font-mono text-xs text-neutral-400">{site.path}</td>
-                  <td className="text-neutral-400">{site.port}</td>
-                  <td>
-                    <span className={site.running ? 'text-green-400' : 'text-neutral-500'}>
-                      {site.running ? 'Running' : 'Stopped'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex gap-1">
-                      {site.running ? (
-                        <>
-                          <Button size="sm" variant="outline" onClick={() => void act(site.id, 'stop')}>
-                            Stop
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => void act(site.id, 'restart')}>
-                            Restart
-                          </Button>
-                        </>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => void act(site.id, 'start')}>
-                          Start
-                        </Button>
-                      )}
-                      <Button size="sm" variant="outline" onClick={() => void showLogs(site)}>
-                        Log
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void remove(site)}>
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </Card>
+      {visible.length === 0 ? (
+        <p className="text-sm text-neutral-400">No {siteType} websites yet</p>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {visible.map((site) => (
+            <Card key={site.id}>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="mr-auto text-[15px] font-semibold">{site.name}</span>
+                <Badge tone={site.running ? 'success' : 'neutral'}>{site.running ? 'Running' : 'Stopped'}</Badge>
+              </div>
+              <p className="font-mono text-xs text-neutral-400">{site.path}</p>
+              <p className="mt-0.5 text-xs text-neutral-400">
+                {site.type} · port {site.port}
+                {site.running && siteHost !== '' && (
+                  <>
+                    {' · '}
+                    <a className="text-green-400" href={`http://${siteHost}:${site.port}`} target="_blank" rel="noreferrer">
+                      Open
+                    </a>
+                  </>
+                )}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1">
+                {site.running ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => void act(site.id, 'stop')}>
+                      Stop
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void act(site.id, 'restart')}>
+                      Restart
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => void act(site.id, 'start')}>
+                    Start
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => void showLogs(site)}>
+                  Log
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => navigateTo('files')}>
+                  Files
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void remove(site)}>
+                  Delete
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <h2 className="mb-2 mt-6 text-lg font-bold">Nginx reverse proxy</h2>
       <div className="mb-3 flex items-center gap-2 text-sm">
@@ -299,6 +342,24 @@ export function SitesPage(): ReactElement {
                 {formError}
               </p>
             )}
+            <div className="mb-3 grid grid-cols-4 gap-1" role="group" aria-label="Runtime engine">
+              {SITE_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  aria-label={`Engine ${type}`}
+                  aria-pressed={siteType === type}
+                  onClick={() => setSiteType(type)}
+                  className={
+                    siteType === type
+                      ? 'rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-2 text-xs font-semibold text-emerald-300'
+                      : 'rounded-md border border-neutral-700 px-2 py-2 text-xs text-neutral-300 hover:bg-neutral-800'
+                  }
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
             <div className="flex flex-col gap-2">
               <Input placeholder="Site name" value={form.name} onChange={(ev) => setForm({ ...form, name: ev.target.value })} />
               <Input placeholder="Entry file or folder" value={form.path} onChange={(ev) => setForm({ ...form, path: ev.target.value })} />

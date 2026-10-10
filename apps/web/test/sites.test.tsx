@@ -136,4 +136,40 @@ describe('web sites page', () => {
     const save = calls.find((c) => c.url === '/api/nginx/proxies' && c.method === 'POST');
     expect(save?.body).toMatchObject({ name: 'p', listenPort: 8080, domain: '', targetPort: 3000 });
   });
+
+  it('searches, filters by status and counts', async () => {
+    stubApi((url) => baseHandler(url));
+    await act(async () => {
+      render(<SitesPage />);
+    });
+    expect(screen.getByText('1 online · 1 stopped · 0 proxies')).not.toBeNull();
+    expect(screen.getByText('Open').getAttribute('href')).toContain(':3000');
+    fireEvent.change(screen.getByLabelText('Search sites'), { target: { value: 'zzz' } });
+    expect(screen.queryByText('web')).toBeNull();
+    expect(screen.getByText('No node websites yet')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Search sites'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Filter status'), { target: { value: 'stopped' } });
+    expect(screen.getByText('No node websites yet')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Filter status'), { target: { value: 'all' } });
+    expect(screen.getByText('web')).not.toBeNull();
+  });
+
+  it('picks the engine from cards in the add modal', async () => {
+    const { calls } = stubApi((url) => baseHandler(url));
+    await act(async () => {
+      render(<SitesPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Add (node)'));
+    });
+    fireEvent.click(screen.getByLabelText('Engine go'));
+    fireEvent.change(screen.getByPlaceholderText('Site name'), { target: { value: 'g' } });
+    fireEvent.change(screen.getByPlaceholderText('Entry file or folder'), { target: { value: 'main.go' } });
+    fireEvent.change(screen.getByPlaceholderText('Port'), { target: { value: '9090' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+    const save = calls.find((c) => c.url === '/api/sites' && c.method === 'POST');
+    expect(save?.body).toMatchObject({ name: 'g', path: 'main.go', port: 9090, type: 'go' });
+  });
 });
