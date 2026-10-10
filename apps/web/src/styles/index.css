@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* OLP theme tokens (dark-first, Terwo palette parity: neutral dark + green accent). */
+:root {
+  color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
+}
