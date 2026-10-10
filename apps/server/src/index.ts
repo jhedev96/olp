@@ -16,8 +16,10 @@ import { fileSiteStore, realSpawner, registerSitesRoutes } from './sites.js';
 import type { SiteSpawner, SiteStore } from './sites.js';
 import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
 import type { ProxyStore, ProxySystem } from './proxy.js';
-import { fileRegistry, mysqlDriver, pgDriver, registerDatabaseRoutes } from './database.js';
+import { fileRegistry, mysqlDriver, normalizeConfig, pgDriver, registerDatabaseRoutes } from './database.js';
 import type { DbDriver, DbEngine, DbRegistry } from './database.js';
+import { nodeBackupSys, registerBackupRoutes } from './backup.js';
+import type { BackupSystem } from './backup.js';
 import { nodeCronBackend, registerCronRoutes } from './cron.js';
 import type { CronBackend } from './cron.js';
 import { realSpawnShell, registerStoreRoutes } from './store.js';
@@ -46,6 +48,7 @@ export interface ServerOptions {
   proxySys?: ProxySystem;
   dbRegistry?: DbRegistry;
   dbDrivers?: Record<DbEngine, DbDriver>;
+  backupSys?: BackupSystem;
   cronBackend?: CronBackend;
   storeCheck?: (cmd: string) => Promise<boolean>;
   storeSpawn?: SpawnShell;
@@ -91,9 +94,16 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     store: opts.proxyStore ?? fileProxyStore(auth.dataDir),
     sys: opts.proxySys ?? nodeProxySys(),
   });
+  const dbRegistry = opts.dbRegistry ?? fileRegistry(auth.dataDir);
   registerDatabaseRoutes(app, {
-    registry: opts.dbRegistry ?? fileRegistry(auth.dataDir),
+    registry: dbRegistry,
     drivers: opts.dbDrivers ?? { mysql: mysqlDriver(), postgres: pgDriver() },
+  });
+  registerBackupRoutes(app, {
+    dataDir: auth.dataDir,
+    root,
+    sys: opts.backupSys ?? nodeBackupSys(),
+    dbConfig: (engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>),
   });
   registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend() });
   registerStoreRoutes(app, {

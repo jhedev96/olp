@@ -26,12 +26,12 @@ export type BackupType = 'folder' | 'mysql' | 'postgres';
 export interface BackupMeta { name: string; file: string; type: BackupType; source: string; created: number }
 export interface BackupEntry extends BackupMeta { size: number; mtime: number }
 export interface BackupSystem {
-  exec(cmd: string, timeoutMs: number): Promise<string>; // shell (defaultExec compatible)
+  exec(cmd: string, timeoutMs: number, opts?: { cwd?: string }): Promise<string>; // shell (defaultExec compatible)
   hasBin(bin: string): Promise<boolean>;
   mkdirp(dir: string): void;
   listDir(dir: string): string[];
   readFile(path: string): string | null;
-  writeFile(path: string, data: string): void;
+  writeFile(path: string, data: string, opts?: { mode?: number }): void;
   removeFile(path: string): void;   // missing file → no-op (delete parity)
   statFile(path: string): { size: number; mtime: number; isFile: boolean } | null;
   streamFile(path: string): NodeJS.ReadableStream;
