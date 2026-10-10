@@ -81,7 +81,7 @@ Each item gets a dedicated spec in `SPECS/spec-<id>.md` before implementation.
 - **Offline-first**: no CDN at runtime. Vendor assets (`lucide`, `xterm.js`) stay local, managed via npm + Vite bundle.
 - **Security**: localhost bind by default; `0.0.0.0` explicit opt-in with warning; `PANEL_ROOT` jail; input validation (`safePath`/`safeName` semantics preserved); no secrets in logs; file perms `0600` for config.
 - **Performance**: dashboard payload < 50 KB; API p95 < 200 ms on low-end device (excluding exec polling); frontend LCP < 2.5s on LAN.
-- **Compatibility**: Node.js baseline TBD (see Open Questions — research active). Initial proposal to validate: Node 20 LTS minimum.
+- **Compatibility**: Node.js `>=22.12` (locked per ADR-001; Node 24 preferred for fresh installs). Debian/Ubuntu installers must use NodeSource, not distro defaults.
 
 ## 9. Success Metrics (v2.0 exit criteria)
 
@@ -99,7 +99,7 @@ Each item gets a dedicated spec in `SPECS/spec-<id>.md` before implementation.
 
 ## 11. Open Questions (all must resolve to a spec before build)
 
-1. Node.js minimum version (proposal: 20 LTS) — pending research on distro-packaged Node versions and `node-pty` support. Owner: TBD.
+1. Node.js minimum version — locked per ADR-001: `>=22.12` (Node 20 EOL 2026-04-30, rejected).
 2. Windows-native package manager choice (`winget` vs `choco` vs `scoop`) and service model — deferred to Windows-native plan, but interface in `env-core` must not preclude it.
 3. Auth upgrade: stay PBKDF2 (120k iterations) for v2.0 or move to argon2id now?
 4. Frontend router: Vite + minimal router vs single `app.html` port? Proposal: Vite SPA with `/login /dashboard /website /database /files /cron /backup /settings /terminal /store` slugs preserved.
