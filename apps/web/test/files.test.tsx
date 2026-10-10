@@ -104,12 +104,12 @@ describe('web files page', () => {
     });
     const renameDialog = screen.getByRole('dialog');
     const input = within(renameDialog).getByRole('textbox') as HTMLInputElement;
-    expect(input.value).toBe('docs');
-    fireEvent.change(input, { target: { value: 'docs2' } });
+    expect(input.value).toBe('a.txt');
+    fireEvent.change(input, { target: { value: 'b.txt' } });
     await act(async () => {
       fireEvent.click(within(renameDialog).getByRole('button', { name: 'Rename' }));
     });
-    expect(calls.some((c) => c.url === '/api/rename' && (c.body as { to: string }).to === 'docs2')).toBe(true);
+    expect(calls.some((c) => c.url === '/api/rename' && (c.body as { to: string }).to === 'b.txt')).toBe(true);
 
     fireEvent.click(screen.getByText('Touch'));
     const touchDialog = screen.getByRole('dialog');
@@ -161,5 +161,60 @@ describe('web files page', () => {
       render(<FilesPage />);
     });
     expect(screen.getByRole('alert').textContent).toBe('Failed to load');
+  });
+
+  it('edits files in tabs and closes them', async () => {
+    stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
+    });
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain('a.txt');
+    const area = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(area.value).toBe('hello');
+    fireEvent.change(area, { target: { value: 'world' } });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Edit')[1] as HTMLElement);
+    });
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain('a.zip');
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Close a.zip'));
+    });
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain('a.txt');
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('world');
+  });
+
+  it('selects entries and deletes them in bulk', async () => {
+    const { calls } = stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    fireEvent.click(screen.getByLabelText('Select a.txt'));
+    fireEvent.click(screen.getByLabelText('Select i.png'));
+    expect(screen.getByText('2')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Delete 2' }));
+    });
+    const dialog = screen.getByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete 2' }));
+    });
+    expect(calls.filter((c) => c.url === '/api/delete')).toHaveLength(2);
+  });
+
+  it('searches, sorts and counts entries', async () => {
+    stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    expect(screen.getByText('4 items (1 folders, 3 files)')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Search files'), { target: { value: '.zip' } });
+    expect(screen.queryByText('a.txt')).toBeNull();
+    expect(screen.getByText('a.zip')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Search files'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Sort entries'), { target: { value: 'size' } });
+    expect(screen.getByText('CAND-019')).not.toBeNull();
   });
 });
