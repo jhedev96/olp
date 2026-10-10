@@ -4,11 +4,11 @@ import type { Root } from 'react-dom/client';
 import { navigate, slugFromPath } from './lib/router.js';
 import type { Slug } from './lib/router.js';
 import { getTheme, setTheme } from './lib/theme.js';
+import { DashboardPage } from './pages/dashboard.js';
 import { LoginPage } from './pages/login.js';
 import './styles/index.css';
 
 const PLACEHOLDER_SLUGS: readonly Slug[] = [
-  'dashboard',
   'website',
   'database',
   'files',
@@ -36,12 +36,10 @@ function render(): void {
   const root = document.getElementById('app');
   if (root === null) return;
   const slug = slugFromPath(window.location.pathname);
-  if (slug === 'login') {
+  if (slug === 'login' || slug === 'dashboard') {
     if (reactRoot === null) reactRoot = createRoot(root);
     reactRoot.render(
-      <StrictMode>
-        <LoginPage />
-      </StrictMode>,
+      <StrictMode>{slug === 'login' ? <LoginPage /> : <DashboardPage />}</StrictMode>,
     );
     return;
   }

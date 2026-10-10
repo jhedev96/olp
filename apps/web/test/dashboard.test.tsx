@@ -1,0 +1,105 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { DashboardPage } from '../src/pages/dashboard.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  document.body.innerHTML = '';
+});
+
+const STATS = {
+  hostname: 'dashbox',
+  uptime: 3661,
+  time: 1728470400000,
+  cpu: { load1: 1.234, load5: 0.5, load15: 0.25, cores: 4 },
+  mem: { total: 8000, free: 2000, used: 6000, percent: 75 },
+  disk: { total: 4000, free: 3000, used: 1000, percent: 25 },
+  battery: { percentage: 87, status: 'CHARGING' },
+};
+
+const SITES = {
+  sites: [
+    { name: 'web', type: 'node', port: 3000, running: true },
+    { name: 'blog', type: 'php', port: 4000, running: false },
+  ],
+};
+
+function stubApi(handler: (url: string) => unknown): { calls: string[] } {
+  const calls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    (url: string) => {
+      calls.push(url);
+      return Promise.resolve(new Response(JSON.stringify(handler(url)), { status: 200 }));
+    },
+  );
+  return { calls };
+}
+
+describe('web dashboard page', () => {
+  it('renders cards and the sites table', async () => {
+    stubApi((url) => (url === '/api/stats' ? STATS : SITES));
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText('1.23')).not.toBeNull();
+    expect(screen.getByText('75%')).not.toBeNull();
+    expect(screen.getByText('87%')).not.toBeNull();
+    expect(screen.getByText('1h 1m')).not.toBeNull();
+    expect(screen.getByText('web')).not.toBeNull();
+    expect(screen.getByText('Running')).not.toBeNull();
+    expect(screen.getByText('Stopped')).not.toBeNull();
+  });
+
+  it('degrades disk and battery gracefully', async () => {
+    stubApi((url) =>
+      url === '/api/stats' ? { ...STATS, disk: null, battery: { error: 'unavailable' } } : { sites: [] },
+    );
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText('No websites yet')).not.toBeNull();
+    expect(screen.getByText('unavailable')).not.toBeNull();
+  });
+
+  it('polls every 5 s and cleans up on unmount', async () => {
+    vi.useFakeTimers();
+    try {
+      const { calls } = stubApi((url) => (url === '/api/stats' ? STATS : SITES));
+      let unmount = (): void => {};
+      await act(async () => {
+        const rendered = render(<DashboardPage />);
+        unmount = rendered.unmount;
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const initial = calls.filter((c) => c === '/api/stats').length;
+      expect(initial).toBeGreaterThanOrEqual(1);
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(calls.filter((c) => c === '/api/stats').length).toBe(initial + 1);
+      unmount();
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+      expect(calls.filter((c) => c === '/api/stats').length).toBe(initial + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps placeholders when polling fails', async () => {
+    stubApi(() => {
+      throw new Error('down');
+    });
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.getByText('No websites yet')).not.toBeNull();
+  });
+});
