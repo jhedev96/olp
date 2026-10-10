@@ -1,14 +1,27 @@
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
+import type { AuthContext } from './auth.js';
+
+/** Configured server plus its auth state (routes mutate `auth`). */
+export interface ServerHandle {
+  app: FastifyInstance;
+  auth: AuthContext;
+}
 
 /**
  * Create and configure the OLP API server.
  *
- * Skeleton only: exposes liveness probes. Domain routes
- * (auth, files, sites, etc.) land here per SPEC during Phase 3.
- *
- * @returns Configured Fastify instance (not yet listening).
+ * Public probes (`/healthz`, `/api/health`, `POST /api/login`) bypass
+ * auth; every other `/api/*` route requires a valid `tpsid` session.
+ * Pass explicit dirs in tests to avoid touching the real home directory.
  */
-export function buildServer() {
+export function buildServer(dirs?: { dataDir?: string; legacyDir?: string }): ServerHandle {
+  const resolved = resolveDirs();
+  const dataDir = dirs?.dataDir ?? resolved.dataDir;
+  const legacyDir = dirs?.legacyDir ?? resolved.legacyDir;
   const app = Fastify({ logger: false });
 
   app.get('/healthz', async () => ({ ok: true, service: 'olp' }));
@@ -18,7 +31,9 @@ export function buildServer() {
     version: '2.0.0-alpha.0',
   }));
 
-  return app;
+  const auth = createAuthContext(dataDir, legacyDir);
+  registerAuthRoutes(app, auth);
+  return { app, auth };
 }
 
 /**
@@ -27,13 +42,25 @@ export function buildServer() {
  * to localhost-only per security posture.
  */
 async function main(): Promise<void> {
-  const port = Number.parseInt(process.env.PANEL_PORT ?? '8080', 10);
-  const host = process.env.PANEL_HOST ?? '127.0.0.1';
-  const app = buildServer();
+  const port = Number.parseInt(process.env['PANEL_PORT'] ?? '8080', 10);
+  const host = process.env['PANEL_HOST'] ?? '127.0.0.1';
+  const { app, auth } = buildServer();
+  if (auth.created && auth.plaintextPassword !== undefined) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `OLP first run — credentials (shown once):\n  username: ${auth.config.username}\n  password: ${auth.plaintextPassword}`,
+    );
+  }
+  setInterval(() => {
+    auth.store.prune();
+  }, 3600 * 1000).unref();
   await app.listen({ port, host });
+  // eslint-disable-next-line no-console
+  console.log(`OLP listening on http://${host}:${port}`);
 }
 
-if (require.main === module) {
+const entry = process.argv[1];
+if (entry !== undefined && resolve(entry) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     // eslint-disable-next-line no-console
     console.error(err);
