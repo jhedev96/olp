@@ -24,6 +24,7 @@ export interface SystemInfo {
 
 export interface SysDeps {
   cpus: () => Array<{ times?: unknown }>; // injectable os.cpus
+  loadavg: () => number[]; // injectable os.loadavg
   totalmem: () => number; freemem: () => number;
   hostname: () => string; uptime: () => number;
   exec: (cmd: string, timeoutMs: number) => Promise<string>; // shell runner
