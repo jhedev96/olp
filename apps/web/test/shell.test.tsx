@@ -160,9 +160,13 @@ describe('web app shell', () => {
 });
 
 describe('web monitor page', () => {
-  it('renders the placeholder with candidate refs', () => {
-    render(<MonitorPage />);
-    expect(screen.getByText('Monitor')).not.toBeNull();
-    expect(screen.getByText(/CAND-014/)).not.toBeNull();
+  it('renders inside the shell with telemetry sections', () => {
+    render(
+      <AppShell slug="monitor">
+        <MonitorPage />
+      </AppShell>,
+    );
+    expect(screen.getByText('CPU load')).not.toBeNull();
+    expect(screen.getAllByText('CAND-014').length).toBeGreaterThan(0);
   });
 });
