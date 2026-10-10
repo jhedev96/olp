@@ -46,3 +46,33 @@
 ## Phase 5 — Release v2.0.0
 
 - [ ] Migration tool + per-OS docs + changelog + tag
+
+## Route Audit — backend surface complete (2026-10-10)
+
+> Method (§9.1): enumerated every `p === '…'` + `p.match(…)` route in
+> `terwo/panel.js`, every `app.get/post/delete('…')` in `apps/server/src`,
+> and every `/api/…` reference in `terwo/public/app.js` + `login.html`.
+> Counts: Terwo 51 route registrations (incl. static pages), OLP 45 API
+> routes + `/term` WS. Verdict: **48/48 UI-used endpoints ported.**
+
+Ported (Terwo → OLP, same path+method): login, logout,
+auth/change-username, auth/change-password, auth/logout-all, settings×2,
+settings/test-telegram, stats, files, mkdir, touch, rename, delete, read,
+write, upload, download, files/zip, files/unzip, files/preview,
+sites×2 + :id/start|stop|restart|delete|logs, install + :id/start|log,
+db/:engine×9 (mysql+postgres), nginx/status|service|proxies +
+proxies/:id DELETE, cron/status|service|jobs×2 + jobs/:id/toggle|DELETE,
+backups×2 + :name/download|restore|DELETE, `/term` WS. Plus OLP addition
+`GET /api/me` (no Terwo counterpart, needed by the SPA).
+
+Deliberate drops (all verified unused by `app.js` + `login.html`):
+- `GET /api/sysinfo` — legacy snapshot superseded by `/api/stats` (the UI
+  only ever called `/api/stats`).
+- `POST /api/chpasswd` — legacy duplicate of `/api/auth/change-password`.
+- `GET /api/battery/debug` — dev diagnostic, no UI caller (revisit as a
+  dev tool if wanted).
+
+Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
+— served by the Vite SPA in OLP, not the API server.
+
+- [x] Backend surface audit (drops recorded above; no silent gaps).
