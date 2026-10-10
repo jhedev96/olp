@@ -1,0 +1,152 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { FilesPage } from '../src/pages/files.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  document.body.innerHTML = '';
+});
+
+interface Recorded {
+  url: string;
+  body: unknown;
+}
+
+const ROOT_ENTRIES = [
+  { name: 'docs', type: 'dir', size: 0, mtime: 1728470400000 },
+  { name: 'a.txt', type: 'file', size: 11, mtime: 1728470400000 },
+  { name: 'i.png', type: 'file', size: 8, mtime: 1728470400000 },
+  { name: 'a.zip', type: 'file', size: 100, mtime: 1728470400000 },
+];
+
+function stubApi(handler: (url: string, body: unknown) => { status: number; json: unknown }): { calls: Recorded[] } {
+  const calls: Recorded[] = [];
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+    const body = init?.body !== undefined && typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+    calls.push({ url, body });
+    const { status, json } = handler(url, body);
+    return Promise.resolve(new Response(JSON.stringify(json), { status }));
+  });
+  return { calls };
+}
+
+function filesHandler(url: string, body: unknown): { status: number; json: unknown } {
+  if (url.startsWith('/api/files?path=')) {
+    const path = decodeURIComponent(url.split('path=')[1] ?? '');
+    if (path === 'docs') return { status: 200, json: { path, entries: [{ name: 'n.txt', type: 'file', size: 1, mtime: 0 }] } };
+    return { status: 200, json: { path: '', entries: ROOT_ENTRIES } };
+  }
+  if (url === '/api/read') return { status: 200, json: { ok: true, content: 'hello' } };
+  if (url === '/api/upload') return { status: 200, json: { ok: true, size: 5 } };
+  return { status: 200, json: { ok: true } };
+}
+
+describe('web files page', () => {
+  it('lists entries with per-type actions', async () => {
+    stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    expect(screen.getByText('docs')).not.toBeNull();
+    expect(screen.getByText('a.txt')).not.toBeNull();
+    expect(screen.getAllByText('Zip')).toHaveLength(4);
+    expect(screen.getByText('View')).not.toBeNull();
+    expect(screen.getByText('Unzip')).not.toBeNull();
+    expect(screen.getByText('11 B')).not.toBeNull();
+  });
+
+  it('navigates into directories and back up', async () => {
+    stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('docs'));
+    });
+    expect(screen.getByText('n.txt')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('..'));
+    });
+    expect(screen.getByText('a.txt')).not.toBeNull();
+  });
+
+  it('creates folders from the input field', async () => {
+    const { calls } = stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    fireEvent.change(screen.getByPlaceholderText('New folder / file name'), { target: { value: 'ndir' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Mkdir'));
+    });
+    expect(calls.some((c) => c.url === '/api/mkdir' && (c.body as { name: string }).name === 'ndir')).toBe(true);
+  });
+
+  it('confirms deletes and prompts renames', async () => {
+    const { calls } = stubApi(filesHandler);
+    const confirm = vi.fn(() => true);
+    const prompt = vi.fn(() => 'b.txt');
+    (window as unknown as Record<string, unknown>).confirm = confirm;
+    (window as unknown as Record<string, unknown>).prompt = prompt;
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    const deletes = screen.getAllByText('Delete');
+    await act(async () => {
+      fireEvent.click(deletes[0] as HTMLElement);
+    });
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.url === '/api/delete')).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Rename')[0] as HTMLElement);
+    });
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.url === '/api/rename' && (c.body as { to: string }).to === 'b.txt')).toBe(true);
+  });
+
+  it('opens the editor and saves', async () => {
+    const { calls } = stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
+    });
+    const area = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(area.value).toBe('hello');
+    fireEvent.change(area, { target: { value: 'world' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+    const write = calls.find((c) => c.url === '/api/write');
+    expect(write?.body).toMatchObject({ name: 'a.txt', content: 'world' });
+  });
+
+  it('uploads files as base64', async () => {
+    const { calls } = stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    const file = new File(['hello'], 'u.bin', { type: 'application/octet-stream' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+    await waitFor(() => {
+      expect(calls.some((c) => c.url === '/api/upload')).toBe(true);
+    });
+    const upload = calls.find((c) => c.url === '/api/upload');
+    expect(upload?.body).toMatchObject({ name: 'u.bin', data: Buffer.from('hello').toString('base64') });
+  });
+
+  it('shows load errors', async () => {
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('down')));
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Failed to load');
+  });
+});
