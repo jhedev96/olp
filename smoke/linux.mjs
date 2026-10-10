@@ -71,10 +71,9 @@ check('site logs live', logs.running === true);
 check('site stop', json('POST', `/api/sites/${sid}/stop`).ok === true);
 check('site delete', json('POST', `/api/sites/${sid}/delete`).ok === true);
 
-// static site via python3
-execSync(`mkdir -p /tmp/olp-smoke-root/pub && echo STATIC-SMOKE > /tmp/olp-smoke-root/pub/index.html`);
-const st = json('POST', '/api/sites', { name: 'smoke-static', type: 'static', path: '/tmp/olp-smoke-root/pub', port: 18902 });
-check('static create outside jail rejected', st.error === 'Access outside working directory denied');
+// absolute paths outside the jail are always denied (resolve() semantics)
+const evil = json('POST', '/api/sites', { name: 'evil', type: 'static', path: '/etc', port: 18903 });
+check('static outside jail rejected', evil.error === 'Access outside working directory denied');
 
 // settings + store + proxy + cron (no daemons here)
 check('settings get', json('GET', '/api/settings').username === U);
