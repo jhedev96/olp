@@ -13,8 +13,8 @@
 | CAND-004 | Monitor: kill runaway process | NEW: privileged kill endpoint (authz design required — dangerous) | Security review mandatory before building |
 | CAND-005 | Dashboard: Services & Daemons section | NEW: daemon status+control endpoint (mariadb/pg/redis/cronie) or reuse `services` package server-side | Refined P0b: cards show ACTIVE/START per daemon; pairs with `pkgman`/`services` backend wave |
 | CAND-006 | Database: Create New Database button | NEW: `POST /api/db/:engine/databases` (CREATE DATABASE) | Small; needs privilege + validation design |
-| CAND-007 | Backup: extras beyond CRUD | TBD in P0 inventory (backup screen is 58 KB — audit it) | Fill after P0 reads the screen properly |
-| CAND-008 | Settings/others: extras found in P0 | TBD in P0 inventory | Catch-all, must be emptied or itemized by P0 end |
+| CAND-007 | ~~Backup extras beyond CRUD~~ | SUPERSEDED by P0e row detail + CAND-029 (closed 2026-10-10) | Catch-all emptied, do not reopen |
+| CAND-008 | ~~Unresolved P0 leftovers~~ | SUPERSEDED — P0 closed 2026-10-10 with zero TBD rows | Catch-all emptied, do not reopen |
 | CAND-009 | Lucide icon pass (replace emoji) | none (frontend-only) | Opportunistic per page; files page partially done |
 | CAND-010 | `confirm()`/`prompt()` → Dialog | none (frontend-only, approved) | P2 shared Dialog unblocks all call sites |
 | CAND-011 | Header avatar / user profiles | NEW or dummy-forever (single-admin has no profiles) | From P0a shell read; likely permanent dummy |
