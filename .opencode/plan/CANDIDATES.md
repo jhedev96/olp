@@ -33,6 +33,11 @@
 | CAND-024 | Redis engine + browser | NEW: full Redis driver (INFO/KEYS/GET) + UI engine tab | From P0d database read (engine card exists in mockup) |
 | CAND-025 | SQL import/export file transfer | NEW: dump/restore-via-upload endpoints (or backup-module reuse) | From P0d database read (Import/Export buttons) |
 | CAND-026 | Schema DDL view + table sizes/row counts + data-vs-index panel | NEW: information_schema endpoints (or composed ad-hoc SQL — decide in wave) | From P0d database read |
+| CAND-027 | Store extras (pkg update, batch upgrade, installed versions, conf path + Configure, mirror/latency) | NEW: package-management endpoints (update/upgrade/version probe) | From P0e store read; versions need per-bin `--version` mapping |
+| CAND-028 | Cron extras (dry-run-all, next-run countdown, dispatch stats/latency, battery card, daemon PID) | NEW: execution-history tracking + schedule math + daemon introspection | From P0e cron read; stats need run-result persistence |
+| CAND-029 | Backup advanced (scheduled snapshots, upload import, SHA256 verify, full-system bundle, gzip variant) | NEW: scheduler integration + upload/restore + hash endpoints | From P0e backup read |
+| CAND-030 | Active device sessions table + per-session revoke | NEW: session metadata tracking (UA/IP/last-seen) + revoke endpoint | From P0e settings read; privacy design (what to store) required |
+| CAND-031 | Server config management (bind controls, telegram verified badge, remember-me 30d, rehash flag) + PBKDF2 display decision | MIXED: verified-badge needs getMe proxy (small NEW); bind controls need restart-capable config (design); remember-me needs TTL option; rehash flag + 310k text need HUMAN DROP DECISION (no cryptographic effect, contradicts 120k truth) | From P0e settings+login read; user decision pending on the drop |
 
 Rules: add rows only from inventory verdicts (no drive-by ideas without
 a mockup source); when scheduling, write the full spec first (rules §1).
