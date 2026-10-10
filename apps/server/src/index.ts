@@ -27,6 +27,7 @@ import { realSpawnShell, registerStoreRoutes } from './store.js';
 import type { SpawnShell } from './store.js';
 import { fileSettingsStore, registerSettingsRoutes } from './settings.js';
 import type { SettingsStore } from './settings.js';
+import { migrateLegacy } from './migrate.js';
 import { TelegramBot, nodeTelegramApi } from './telegram.js';
 import type { BotStatus, TelegramApi } from './telegram.js';
 import { createWatchdog, nodeProbe } from './watchdog.js';
@@ -99,6 +100,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   }));
 
   const auth = createAuthContext(dataDir, legacyDir);
+  migrateLegacy(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
