@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
+import { Moon, Sun, X, createIcons } from 'lucide';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtSize } from '../lib/format.js';
 import { getTheme, setTheme } from '../lib/theme.js';
@@ -58,6 +59,10 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
   const [theme, setThemeState] = useState(getTheme);
   const [stats, setStats] = useState<MarketingStats | null>(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    createIcons({ icons: { Moon, Sun, X } });
+  });
 
   useEffect(() => {
     let alive = true;
@@ -121,7 +126,7 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-surface p-4">
       <Button variant="ghost" size="icon" className="absolute right-4 top-4" title={theme === 'light' ? 'Dark mode' : 'Light mode'} onClick={toggleTheme}>
-        {theme === 'light' ? '🌙' : '☀️'}
+        <i data-lucide={theme === 'light' ? 'moon' : 'sun'} className="h-4 w-4" />
       </Button>
       <div className="grid w-full max-w-5xl gap-4 lg:grid-cols-2">
         <section aria-label="About this panel" className="flex flex-col gap-3 rounded-lg border border-neutral-800 bg-surface-low p-6">
@@ -194,7 +199,7 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
                 <div className="flex gap-2">
                   <Input placeholder="Username" autoComplete="username" value={username} onChange={(ev) => setUsername(ev.target.value)} />
                   <Button type="button" variant="ghost" size="sm" aria-label="Clear username" onClick={() => setUsername('')}>
-                    ✕
+                    <i data-lucide="x" className="h-4 w-4" />
                   </Button>
                 </div>
                 <p className="-mb-1 text-right text-[11px] text-neutral-500">Local Storage Key</p>
@@ -207,7 +212,7 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
                     onChange={(ev) => setPassword(ev.target.value)}
                   />
                   <Button type="button" variant="ghost" size="sm" aria-label="Clear password" onClick={() => setPassword('')}>
-                    ✕
+                    <i data-lucide="x" className="h-4 w-4" />
                   </Button>
                 </div>
                 <label className="flex items-center gap-2 text-xs text-neutral-400" title="Coming soon (CAND-031)">

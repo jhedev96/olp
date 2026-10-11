@@ -5,8 +5,8 @@ import { fmtDate, fmtSize } from '../lib/format.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Badge } from '../components/common/Badge.js';
 import { ComingSoon } from '../components/common/States.js';
+import { DataTable } from '../components/common/DataTable.js';
 import { Button } from '../components/ui/button.js';
-import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
 
 /** `/api/backups` row shape (server contract). */
@@ -222,46 +222,54 @@ export function BackupPage(): ReactElement {
           <option value="oldest">Oldest first</option>
         </select>
       </div>
-      <Card className="p-0">
-        <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] text-sm">
-          <tbody>
-            {sorted.length === 0 ? (
-              <tr>
-                <td className="text-neutral-400">No backups yet</td>
-              </tr>
-            ) : (
-              sorted.map((backup) => (
-                <tr key={backup.name}>
-                  <td>
-                    {backup.name}
-                    {newest?.name === backup.name && (
-                      <span className="ml-2 text-[11px] text-emerald-400">latest · {fmtDate(backup.mtime)}</span>
-                    )}
-                  </td>
-                  <td className="text-neutral-400">{backup.type}</td>
-                  <td className="font-mono text-xs text-neutral-400">{backup.source === '' ? '—' : backup.source}</td>
-                  <td className="text-neutral-400">{fmtSize(backup.size)}</td>
-                  <td>
-                    <div className="flex gap-1">
-                      <a className="text-xs text-green-400" href={`/api/backups/${encodeURIComponent(backup.name)}/download`}>
-                        Download
-                      </a>
-                      <Button size="sm" variant="outline" onClick={() => void restore(backup)}>
-                        Restore
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void remove(backup)}>
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-        </div>
-      </Card>
+      <div className="overflow-x-auto">
+        <DataTable<BackupRow>
+          label="Backups"
+          columns={[
+            {
+              key: 'name',
+              header: 'Name',
+              cell: (backup) => (
+                <>
+                  {backup.name}
+                  {newest?.name === backup.name && (
+                    <span className="ml-2 text-[11px] text-emerald-400">latest · {fmtDate(backup.mtime)}</span>
+                  )}
+                </>
+              ),
+            },
+            { key: 'type', header: 'Type', cell: (backup) => <span className="text-neutral-400">{backup.type}</span> },
+            {
+              key: 'source',
+              header: 'Source',
+              cell: (backup) => (
+                <span className="font-mono text-xs text-neutral-400">{backup.source === '' ? '—' : backup.source}</span>
+              ),
+            },
+            { key: 'size', header: 'Size', cell: (backup) => <span className="text-neutral-400">{fmtSize(backup.size)}</span> },
+            {
+              key: 'actions',
+              header: 'Actions',
+              cell: (backup) => (
+                <div className="flex gap-1">
+                  <a className="text-xs text-green-400" href={`/api/backups/${encodeURIComponent(backup.name)}/download`}>
+                    Download
+                  </a>
+                  <Button size="sm" variant="outline" onClick={() => void restore(backup)}>
+                    Restore
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => void remove(backup)}>
+                    Delete
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+          rows={sorted}
+          rowKey={(backup) => backup.name}
+          emptyText="No backups yet"
+        />
+      </div>
       <ConfirmDialog
         open={pendingRestore !== null}
         title="Restore backup"

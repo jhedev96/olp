@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtSize } from '../lib/format.js';
-import { ComingSoon } from '../components/common/States.js';
+import { ComingSoon, EmptyState } from '../components/common/States.js';
 import { Badge } from '../components/common/Badge.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
@@ -220,7 +220,9 @@ export function StorePage(): ReactElement {
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         {visible.length === 0 ? (
-          <p className="text-sm text-neutral-400">No packages match.</p>
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900 md:col-span-3">
+            <EmptyState title="No packages match." hint="Try another search or category." />
+          </div>
         ) : (
           visible.map((item) => (
           <Card key={item.id}>
