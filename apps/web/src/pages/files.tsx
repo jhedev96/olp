@@ -15,8 +15,12 @@ import {
 } from 'lucide';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
+import type { EditorView } from '@codemirror/view';
 import { ConfirmDialog, PromptDialog } from '../components/common/Dialog.js';
 import { ComingSoon } from '../components/common/States.js';
+import { CodeEditor } from '../components/code/CodeEditor.js';
+import { CodePreview } from '../components/code/CodePreview.js';
+import { languageFor } from '../components/code/languages.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -70,24 +74,34 @@ function isZip(name: string): boolean {
   return /\.zip$/i.test(name);
 }
 
+/** Text-like names worth a read-only preview (dotfiles included). */
+export function isPreviewable(name: string): boolean {
+  if (isImage(name)) return false;
+  if (languageFor(name).lowlight !== 'plaintext') return true;
+  if (/\.(txt|log|conf|cfg|ini|toml)$/i.test(name)) return true;
+  return /(^|\/)\.[^./]+$/.test(name);
+}
+
 /**
  * File manager (mockup file-manager parity): root card, search + sort
- * + refresh, multi-select bulk bar with selection size, tabbed editor
- * with line counts, caret readout, and discard-to-opened, per-type row
- * actions, base64 upload, image preview. Honestly omitted (no source,
+ * + refresh, multi-select bulk bar with selection size, tabbed code
+ * editor (highlight + line numbers, discard-to-opened) and highlighted
+ * read-only preview, per-type row actions, base64 upload, image
+ * preview. The editor carries its native cursor (no custom readout).
+ * Honestly omitted (no source,
  * backend frozen): Chmod column + ACL card (CAND-016), wakelock card,
  * CLI-jump chips (crumbs already cover fast navigation), symlink health
  * (CAND-014), editor prettify/diff (CAND-033); mounts/shortcuts ship as
  * a Coming-Soon section (CAND-019).
  */
-export function FilesPage(): ReactElement {
+export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView | null) => void } = {}): ReactElement {
   const [dir, setDir] = useState('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState('');
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [activeTab, setActiveTab] = useState(0);
   const [editorError, setEditorError] = useState('');
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ name: string; kind: 'image' | 'code'; content?: string } | null>(null);
   const [newName, setNewName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
@@ -279,14 +293,24 @@ export function FilesPage(): ReactElement {
     setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: t.original } : t)));
   };
 
-  /** `Ln x, Col y` from the caret (1-based; real cursor tracking). */
-  const caretPos = (area: HTMLTextAreaElement | null): string => {
-    if (area === null || tab === undefined) return 'Ln 1, Col 1';
-    const upto = tab.content.slice(0, area.selectionStart ?? 0).split('\n');
-    return `Ln ${upto.length}, Col ${(upto[upto.length - 1]?.length ?? 0) + 1}`;
+  const openPreview = async (name: string): Promise<void> => {
+    if (isImage(name)) {
+      setPreview({ name, kind: 'image' });
+      return;
+    }
+    setEditorError('');
+    try {
+      const body = await apiJson<{ ok?: unknown; content?: unknown; error?: string }>('/api/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dir, name }),
+      });
+      if (typeof body.content === 'string') setPreview({ name, kind: 'code', content: body.content });
+      else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
+    } catch (err) {
+      setEditorError(err instanceof ApiError ? err.message : 'Failed');
+    }
   };
-
-  const [caret, setCaret] = useState('Ln 1, Col 1');
 
   const upload = async (file: File | undefined): Promise<void> => {
     if (file === undefined) return;
@@ -503,8 +527,8 @@ export function FilesPage(): ReactElement {
                         <button type="button" className="text-xs" onClick={() => void openEditor(entry.name)}>
                           <Icon name="pencil" label="Edit" /> Edit
                         </button>
-                        {isImage(entry.name) && (
-                          <button type="button" className="text-xs" onClick={() => setPreview(entry.name)}>
+                        {(isImage(entry.name) || isPreviewable(entry.name)) && (
+                          <button type="button" className="text-xs" onClick={() => void openPreview(entry.name)}>
                             <Icon name="eye" label="Preview" /> View
                           </button>
                         )}
@@ -584,18 +608,15 @@ export function FilesPage(): ReactElement {
                 <p className="mb-1 text-xs text-neutral-500">
                   UTF-8 · LF · {tab.content.split('\n').length} lines{tab.content !== tab.original ? ' · edited' : ''}
                 </p>
-                <textarea
-                  aria-label={`Edit ${tab.name}`}
-                  className="h-64 w-full rounded border border-neutral-700 bg-transparent p-2 font-mono text-sm"
+                <CodeEditor
+                  filename={tab.name}
                   value={tab.content}
-                  onChange={(ev) => {
-                    setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: ev.target.value } : t)));
-                    setCaret(caretPos(ev.target));
-                  }}
-                  onSelect={(ev) => setCaret(caretPos(ev.target as HTMLTextAreaElement))}
-                  onKeyUp={(ev) => setCaret(caretPos(ev.target as HTMLTextAreaElement))}
+                  onChange={(content) =>
+                    setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content } : t)))
+                  }
+                  ariaLabel={`Edit ${tab.name}`}
+                  viewRef={editorViewRef}
                 />
-                <p className="mt-1 text-xs text-neutral-500">{caret}</p>
               </>
             )}
             <div className="mt-2 flex gap-2">
@@ -649,11 +670,23 @@ export function FilesPage(): ReactElement {
       />
       {preview !== null && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreview(null)}>
-          <img
-            src={`/api/files/preview?path=${encodeURIComponent(dir === '' ? preview : `${dir}/${preview}`)}`}
-            alt={preview}
-            className="max-h-full max-w-full"
-          />
+          {preview.kind === 'image' ? (
+            <img
+              src={`/api/files/preview?path=${encodeURIComponent(dir === '' ? preview.name : `${dir}/${preview.name}`)}`}
+              alt={preview.name}
+              className="max-h-full max-w-full"
+            />
+          ) : (
+            <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-900 p-4" onClick={(ev) => ev.stopPropagation()}>
+              <h2 className="mb-2 font-mono text-sm font-bold">{preview.name}</h2>
+              <CodePreview filename={preview.name} code={preview.content ?? ''} />
+              <div className="mt-2">
+                <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </main>

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { EditorView } from '@codemirror/view';
 import { FilesPage } from '../src/pages/files.js';
 
 afterEach(() => {
@@ -52,7 +53,7 @@ describe('web files page', () => {
     expect(screen.getByText('docs')).not.toBeNull();
     expect(screen.getByText('a.txt')).not.toBeNull();
     expect(screen.getAllByText('Zip')).toHaveLength(4);
-    expect(screen.getByText('View')).not.toBeNull();
+    expect(screen.getAllByText('View')).toHaveLength(2);
     expect(screen.getByText('Unzip')).not.toBeNull();
     expect(screen.getByText('11 B')).not.toBeNull();
   });
@@ -122,15 +123,20 @@ describe('web files page', () => {
 
   it('opens the editor and saves', async () => {
     const { calls } = stubApi(filesHandler);
+    const holder: { view: EditorView | null } = { view: null };
     await act(async () => {
-      render(<FilesPage />);
+      render(<FilesPage editorViewRef={(v) => { holder.view = v; }} />);
     });
     await act(async () => {
       fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
     });
-    const area = document.querySelector('textarea') as HTMLTextAreaElement;
-    expect(area.value).toBe('hello');
-    fireEvent.change(area, { target: { value: 'world' } });
+    expect(holder.view).not.toBeNull();
+    expect(document.querySelector('.cm-editor')).not.toBeNull();
+    expect(document.querySelector('.cm-content')?.textContent).toContain('hello');
+    await act(async () => {
+      const doc = holder.view?.state.doc;
+      holder.view?.dispatch({ changes: { from: 0, to: doc?.length ?? 0, insert: 'world' } });
+    });
     await act(async () => {
       fireEvent.click(screen.getByText('Save'));
     });
@@ -165,16 +171,19 @@ describe('web files page', () => {
 
   it('edits files in tabs and closes them', async () => {
     stubApi(filesHandler);
+    const holder: { view: EditorView | null } = { view: null };
     await act(async () => {
-      render(<FilesPage />);
+      render(<FilesPage editorViewRef={(v) => { holder.view = v; }} />);
     });
     await act(async () => {
       fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
     });
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain('a.txt');
-    const area = document.querySelector('textarea') as HTMLTextAreaElement;
-    expect(area.value).toBe('hello');
-    fireEvent.change(area, { target: { value: 'world' } });
+    expect(document.querySelector('.cm-content')?.textContent).toContain('hello');
+    await act(async () => {
+      const doc = holder.view?.state.doc;
+      holder.view?.dispatch({ changes: { from: 0, to: doc?.length ?? 0, insert: 'world' } });
+    });
     await act(async () => {
       fireEvent.click(screen.getAllByText('Edit')[1] as HTMLElement);
     });
@@ -183,7 +192,7 @@ describe('web files page', () => {
       fireEvent.click(screen.getByLabelText('Close a.zip'));
     });
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain('a.txt');
-    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('world');
+    expect(document.querySelector('.cm-content')?.textContent).toContain('world');
   });
 
   it('selects entries and deletes them in bulk', async () => {
@@ -220,8 +229,9 @@ describe('web files page', () => {
 
   it('shows bulk size, refreshes and discards edits', async () => {
     const { calls } = stubApi(filesHandler);
+    const holder: { view: EditorView | null } = { view: null };
     await act(async () => {
-      render(<FilesPage />);
+      render(<FilesPage editorViewRef={(v) => { holder.view = v; }} />);
     });
     fireEvent.click(screen.getByLabelText('Select a.txt'));
     expect(screen.getByText('Total size: 11 B')).not.toBeNull();
@@ -234,12 +244,35 @@ describe('web files page', () => {
       fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
     });
     expect(screen.getByText('UTF-8 · LF · 1 lines')).not.toBeNull();
-    const area = document.querySelector('textarea') as HTMLTextAreaElement;
-    fireEvent.change(area, { target: { value: 'dirty' } });
+    await act(async () => {
+      const doc = holder.view?.state.doc;
+      holder.view?.dispatch({ changes: { from: 0, to: doc?.length ?? 0, insert: 'dirty' } });
+    });
     expect(screen.getByText('UTF-8 · LF · 1 lines · edited')).not.toBeNull();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     });
-    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('hello');
+    expect(document.querySelector('.cm-content')?.textContent).toContain('hello');
+  });
+
+  it('previews text as plain pre and images by url', async () => {
+    stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('View')[0] as HTMLElement);
+    });
+    expect(screen.getByText('hello')).not.toBeNull();
+    expect(document.querySelector('span[class*="hljs-"]')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Close'));
+    });
+    expect(screen.queryByText('hello')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('View')[1] as HTMLElement);
+    });
+    const img = document.querySelector('img[alt="i.png"]') as HTMLImageElement;
+    expect(img.src).toContain('/api/files/preview');
   });
 });
