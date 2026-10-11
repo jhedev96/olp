@@ -44,6 +44,8 @@ export interface FileEntry {
 export interface EditorTab {
   name: string;
   content: string;
+  /** Content as opened (Discard reverts here; Prettify/Diff need CAND-033). */
+  original: string;
 }
 
 type SortKey = 'name' | 'size' | 'mtime';
@@ -69,12 +71,14 @@ function isZip(name: string): boolean {
 }
 
 /**
- * File manager (mockup file-manager parity): root card, search + sort,
- * multi-select bulk bar, tabbed editor, per-type row actions, base64
- * upload, image preview. Honestly omitted (no source, backend frozen):
- * Chmod column + ACL card (CAND-016), wakelock card, CLI-jump chips
- * (crumbs already cover fast navigation), symlink health (CAND-014);
- * mounts/shortcuts ship as a Coming-Soon section (CAND-019).
+ * File manager (mockup file-manager parity): root card, search + sort
+ * + refresh, multi-select bulk bar with selection size, tabbed editor
+ * with line counts, caret readout, and discard-to-opened, per-type row
+ * actions, base64 upload, image preview. Honestly omitted (no source,
+ * backend frozen): Chmod column + ACL card (CAND-016), wakelock card,
+ * CLI-jump chips (crumbs already cover fast navigation), symlink health
+ * (CAND-014), editor prettify/diff (CAND-033); mounts/shortcuts ship as
+ * a Coming-Soon section (CAND-019).
  */
 export function FilesPage(): ReactElement {
   const [dir, setDir] = useState('');
@@ -240,7 +244,7 @@ export function FilesPage(): ReactElement {
         body: JSON.stringify({ path: dir, name }),
       });
       if (typeof body.content === 'string') {
-        setTabs((prev) => [...prev, { name, content: body.content as string }]);
+        setTabs((prev) => [...prev, { name, content: body.content as string, original: body.content as string }]);
         setActiveTab(tabs.length);
       } else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
@@ -269,6 +273,21 @@ export function FilesPage(): ReactElement {
     setActiveTab((prev) => Math.max(0, Math.min(index < prev ? prev - 1 : prev, tabs.length - 2)));
   };
 
+  const discardTab = (): void => {
+    const tab = tabs[activeTab];
+    if (tab === undefined) return;
+    setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: t.original } : t)));
+  };
+
+  /** `Ln x, Col y` from the caret (1-based; real cursor tracking). */
+  const caretPos = (area: HTMLTextAreaElement | null): string => {
+    if (area === null || tab === undefined) return 'Ln 1, Col 1';
+    const upto = tab.content.slice(0, area.selectionStart ?? 0).split('\n');
+    return `Ln ${upto.length}, Col ${(upto[upto.length - 1]?.length ?? 0) + 1}`;
+  };
+
+  const [caret, setCaret] = useState('Ln 1, Col 1');
+
   const upload = async (file: File | undefined): Promise<void> => {
     if (file === undefined) return;
     setError('');
@@ -288,6 +307,7 @@ export function FilesPage(): ReactElement {
 
   const crumbs = dir === '' ? [] : dir.split('/');
   const crumbPath = (index: number): string => crumbs.slice(0, index + 1).join('/');
+  const selectedSize = entries.filter((e) => selected.includes(e.name)).reduce((sum, e) => sum + e.size, 0);
 
   const visible = entries
     .filter((e) => e.name.toLowerCase().includes(query.trim().toLowerCase()))
@@ -379,12 +399,16 @@ export function FilesPage(): ReactElement {
           <option value="size">Size</option>
           <option value="mtime">Modified</option>
         </select>
+        <Button size="sm" variant="outline" onClick={() => void load(dir)}>
+          Refresh
+        </Button>
       </div>
       {selected.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm">
           <span>
             <strong>{selected.length}</strong> selected
           </span>
+          <span className="text-neutral-400">Total size: {fmtSize(selectedSize)}</span>
           <Button size="sm" variant="outline" onClick={() => void bulkZip()}>
             Zip {selected.length}
           </Button>
@@ -439,7 +463,7 @@ export function FilesPage(): ReactElement {
               <td>Actions</td>
             </tr>
             {visible.map((entry) => (
-              <tr key={entry.name}>
+              <tr key={entry.name} className={selected.includes(entry.name) ? 'bg-emerald-500/5' : undefined}>
                 <td>
                   <input
                     type="checkbox"
@@ -554,18 +578,30 @@ export function FilesPage(): ReactElement {
               </p>
             )}
             {tab !== undefined && (
-              <textarea
-                aria-label={`Edit ${tab.name}`}
-                className="h-64 w-full rounded border border-neutral-700 bg-transparent p-2 font-mono text-sm"
-                value={tab.content}
-                onChange={(ev) =>
-                  setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: ev.target.value } : t)))
-                }
-              />
+              <>
+                <p className="mb-1 text-xs text-neutral-500">
+                  UTF-8 · LF · {tab.content.split('\n').length} lines{tab.content !== tab.original ? ' · edited' : ''}
+                </p>
+                <textarea
+                  aria-label={`Edit ${tab.name}`}
+                  className="h-64 w-full rounded border border-neutral-700 bg-transparent p-2 font-mono text-sm"
+                  value={tab.content}
+                  onChange={(ev) => {
+                    setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: ev.target.value } : t)));
+                    setCaret(caretPos(ev.target));
+                  }}
+                  onSelect={(ev) => setCaret(caretPos(ev.target as HTMLTextAreaElement))}
+                  onKeyUp={(ev) => setCaret(caretPos(ev.target as HTMLTextAreaElement))}
+                />
+                <p className="mt-1 text-xs text-neutral-500">{caret}</p>
+              </>
             )}
             <div className="mt-2 flex gap-2">
               <Button size="sm" onClick={() => void saveEditor()}>
                 Save
+              </Button>
+              <Button size="sm" variant="outline" onClick={discardTab}>
+                Discard
               </Button>
               <Button size="sm" variant="outline" onClick={() => closeTab(activeTab)}>
                 Close
