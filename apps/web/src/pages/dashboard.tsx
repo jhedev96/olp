@@ -23,6 +23,7 @@ export interface SystemStats {
 export interface DashSite {
   name: string;
   type: string;
+  path: string;
   port: number;
   running: boolean;
 }
@@ -57,12 +58,13 @@ function StatCard({ label, value, sub, bar }: { label: string; value: string; su
 }
 
 /**
- * Dashboard (mockup dashboard parity): live system cards, site table
- * with open-links, store preview, and tracked dummies. Poll failures
- * keep the previous render (never blank) and clean up on unmount.
- * Honestly omitted (no source, backend frozen): CPU temp/frequency,
- * ZRAM/swap, disk FS type, battery thermal/wakelock, PM2 badge,
- * per-site memory (all CAND-014/015); restart-panel ships disabled
+ * Dashboard (mockup dashboard parity): live system cards, filterable
+ * site table with paths and open-links, store preview with install
+ * shortcuts, conditional telegram card, and tracked dummies. Poll
+ * failures keep the previous render (never blank) and clean up on
+ * unmount. Hero pills for PM2/arch/wakelock and card extras (CPU temp,
+ * per-core freq, ZRAM, FS type, battery thermal, per-site memory) have
+ * no source and stay out (CAND-014/015); restart-panel ships disabled
  * (CAND-015); services (CAND-005) and log tail (CAND-013) are
  * Coming-Soon sections.
  */
@@ -70,6 +72,8 @@ export function DashboardPage(): ReactElement {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [sites, setSites] = useState<DashSite[]>([]);
   const [store, setStore] = useState<DashStoreItem[] | null>(null);
+  const [siteFilter, setSiteFilter] = useState('all');
+  const [telegramOn, setTelegramOn] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -104,6 +108,13 @@ export function DashboardPage(): ReactElement {
       .catch(() => {
         // store preview stays empty rather than blocking the page
       });
+    void apiJson<{ telegram?: { enabled?: unknown } }>('/api/settings')
+      .then((body) => {
+        if (alive) setTelegramOn(body.telegram?.enabled === true);
+      })
+      .catch(() => {
+        // telegram card stays hidden without settings access
+      });
     return () => {
       alive = false;
     };
@@ -115,6 +126,8 @@ export function DashboardPage(): ReactElement {
       : { value: '—', sub: stats !== null && 'error' in stats.battery ? stats.battery.error : '' };
 
   const siteHost = typeof window === 'undefined' ? '' : window.location.hostname;
+  const siteTypes = ['all', ...Array.from(new Set(sites.map((s) => s.type)))];
+  const visibleSites = siteFilter === 'all' ? sites : sites.filter((s) => s.type === siteFilter);
 
   return (
     <main className="p-4">
@@ -148,17 +161,27 @@ export function DashboardPage(): ReactElement {
         <StatCard label="Uptime" value={stats !== null ? fmtUptime(stats.uptime) : '—'} sub={stats !== null ? fmtDate(stats.time) : '—'} />
       </div>
       <Card className="mt-4">
-        <h2 className="mb-2 font-bold">Websites</h2>
+        <div className="mb-2 flex flex-wrap items-center gap-1">
+          <h2 className="mr-auto font-bold">Websites</h2>
+          {siteTypes.map((type) => (
+            <Button key={type} size="sm" variant={siteFilter === type ? 'default' : 'ghost'} onClick={() => setSiteFilter(type)}>
+              {type === 'all' ? `All (${sites.length})` : type}
+            </Button>
+          ))}
+        </div>
         <table className="w-full text-sm">
           <tbody>
-            {sites.length === 0 ? (
+            {visibleSites.length === 0 ? (
               <tr>
                 <td className="text-neutral-400">No websites yet</td>
               </tr>
             ) : (
-              sites.map((site) => (
+              visibleSites.map((site) => (
                 <tr key={`${site.name}:${site.port}`}>
-                  <td>{site.name}</td>
+                  <td>
+                    {site.name}
+                    <div className="font-mono text-xs text-neutral-500">{site.path}</div>
+                  </td>
                   <td className="text-neutral-400">{site.type}</td>
                   <td className="text-neutral-400">{site.port}</td>
                   <td>
@@ -178,6 +201,11 @@ export function DashboardPage(): ReactElement {
             )}
           </tbody>
         </table>
+        <div className="mt-2 text-right">
+          <button type="button" className="text-xs text-green-400 hover:underline" onClick={() => navigateTo('website')}>
+            Configure Reverse Proxy →
+          </button>
+        </div>
       </Card>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <Card>
@@ -195,7 +223,13 @@ export function DashboardPage(): ReactElement {
               {store.slice(0, 6).map((item) => (
                 <li key={item.id} className="flex items-center gap-2">
                   <span className="mr-auto">{item.name}</span>
-                  {item.installed && <Badge tone="success">Installed</Badge>}
+                  {item.installed ? (
+                    <Badge tone="success">Installed</Badge>
+                  ) : (
+                    <button type="button" className="text-xs text-green-400 hover:underline" onClick={() => navigateTo('store')}>
+                      Install
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -204,6 +238,17 @@ export function DashboardPage(): ReactElement {
         <div className="flex flex-col gap-3">
           <ComingSoon feature="Services & Daemons" candidate="CAND-005" />
           <ComingSoon feature="Panel log tail" candidate="CAND-013" />
+          {telegramOn && (
+            <Card>
+              <h2 className="font-bold">Telegram alerts on</h2>
+              <p className="mt-1 text-sm text-neutral-400">Bot polling updates every 10s.</p>
+              <div className="mt-2">
+                <Button size="sm" variant="outline" onClick={() => navigateTo('settings')}>
+                  Open settings
+                </Button>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </main>

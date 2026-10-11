@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { DashboardPage } from '../src/pages/dashboard.js';
 
 afterEach(() => {
@@ -21,8 +21,8 @@ const STATS = {
 
 const SITES = {
   sites: [
-    { name: 'web', type: 'node', port: 3000, running: true },
-    { name: 'blog', type: 'php', port: 4000, running: false },
+    { name: 'web', type: 'node', path: 'server.js', port: 3000, running: true },
+    { name: 'blog', type: 'php', path: 'blog', port: 4000, running: false },
   ],
 };
 
@@ -48,6 +48,7 @@ const STORE = {
 function dashboardHandler(url: string): unknown {
   if (url === '/api/stats') return STATS;
   if (url === '/api/install') return STORE;
+  if (url === '/api/settings') return { telegram: { enabled: true } };
   return SITES;
 }
 
@@ -126,5 +127,23 @@ describe('web dashboard page', () => {
     expect(screen.getByText('CAND-005')).not.toBeNull();
     expect(screen.getByText('CAND-013')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Restart panel' })).toHaveProperty('disabled', true);
+  });
+
+  it('filters sites, links proxies and shows telegram state', async () => {
+    stubApi(dashboardHandler);
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText('server.js')).not.toBeNull();
+    expect(screen.getByText('Telegram alerts on')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'php' }));
+    });
+    expect(screen.queryByText('web')).toBeNull();
+    expect(screen.getAllByText('blog').length).toBeGreaterThan(0);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Configure Reverse Proxy →'));
+    });
+    expect(window.location.pathname).toBe('/website');
   });
 });

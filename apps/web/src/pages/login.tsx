@@ -176,7 +176,12 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
               <li key={badge} className="rounded-full border border-neutral-700 px-2 py-0.5">{badge}</li>
             ))}
           </ul>
-          <p className="mt-auto text-[11px] text-neutral-500">OpenLocalPanel v{APP_VERSION} · Node ≥22.12</p>
+          <p className="mt-auto text-[11px] text-neutral-500">
+            OpenLocalPanel v{APP_VERSION} · Node ≥22.12 ·{' '}
+            <a className="hover:text-green-400" href="https://github.com/jhedev96/olp" target="_blank" rel="noreferrer">
+              GitHub
+            </a>
+          </p>
         </section>
 
         <div className="flex items-center justify-center">
@@ -185,12 +190,14 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
             <p className="mb-5 mt-1 text-center text-xs text-neutral-400">Local operations panel</p>
             <CardContent>
               <form onSubmit={(ev) => void submit(ev)} className="flex flex-col gap-3">
+                <p className="-mb-1 text-right text-[11px] text-neutral-500">Default: admin</p>
                 <div className="flex gap-2">
                   <Input placeholder="Username" autoComplete="username" value={username} onChange={(ev) => setUsername(ev.target.value)} />
                   <Button type="button" variant="ghost" size="sm" aria-label="Clear username" onClick={() => setUsername('')}>
                     ✕
                   </Button>
                 </div>
+                <p className="-mb-1 text-right text-[11px] text-neutral-500">Local Storage Key</p>
                 <div className="flex gap-2">
                   <Input
                     type="password"

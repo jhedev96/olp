@@ -153,7 +153,7 @@ export function Sidebar({
         }}
         className={
           active
-            ? 'flex items-center gap-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-300'
+            ? 'flex items-center gap-2 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-neutral-950'
             : 'flex items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800'
         }
       >
