@@ -181,6 +181,7 @@ export function SitesPage(): ReactElement {
   };
 
   const q = query.trim().toLowerCase();
+  const counts = (type: SiteType): number => sites.filter((s) => s.type === type).length;
   const visible = sites.filter(
     (s) =>
       s.type === siteType &&
@@ -204,7 +205,7 @@ export function SitesPage(): ReactElement {
       <div className="mb-3 flex flex-wrap gap-1">
         {SITE_TYPES.map((type) => (
           <Button key={type} size="sm" variant={siteType === type ? 'default' : 'outline'} onClick={() => setSiteType(type)}>
-            {type}
+            {type} ({counts(type)})
           </Button>
         ))}
         <span className="flex-1" />

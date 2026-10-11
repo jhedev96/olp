@@ -199,4 +199,25 @@ describe('web terminal page', () => {
     });
     expect(term.fontPx).toBe(14);
   });
+
+  it('reconnects and executes raw commands', () => {
+    const { sockets } = mounted();
+    act(() => {
+      sockets[0]?.open();
+    });
+    act(() => {
+      fireEvent.click(screen.getByText('Reconnect'));
+    });
+    expect(sockets[0]?.closed).toBe(true);
+    act(() => {
+      sockets[1]?.open();
+    });
+    expect(screen.getByText('Connected')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Send raw command'), { target: { value: 'ls -la' } });
+    act(() => {
+      fireEvent.click(screen.getByText('Exec'));
+    });
+    expect(sockets[1]?.sent).toContain(JSON.stringify({ t: 'in', d: 'ls -la\n' }));
+    expect((screen.getByLabelText('Send raw command') as HTMLInputElement).value).toBe('');
+  });
 });

@@ -49,7 +49,7 @@ describe('web sites page', () => {
     expect(screen.getByText('web')).not.toBeNull();
     expect(screen.queryByText('blog')).toBeNull();
     await act(async () => {
-      fireEvent.click(screen.getByText('php'));
+      fireEvent.click(screen.getByRole('button', { name: /php/ }));
     });
     expect(screen.getByText('blog')).not.toBeNull();
     expect(screen.queryByText('web')).toBeNull();
