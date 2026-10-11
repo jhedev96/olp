@@ -86,10 +86,10 @@ describe('web shell sidebar', () => {
     const bar = container.querySelector('nav[aria-label="Primary"].md\\:hidden');
     const shorts = Array.from(bar?.querySelectorAll('a') ?? []).map((a) => a.textContent);
     expect(shorts).toEqual(['Dash', 'Web', 'Data', 'Files', 'Shell']);
-    expect(screen.getByRole('button', { name: 'More' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Store' })).not.toBeNull();
     expect(screen.queryByRole('menu', { name: 'More destinations' })).toBeNull();
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'More' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Store' }));
     });
     const menu = screen.getByRole('menu', { name: 'More destinations' });
     expect(within(menu).getByText('Monitor')).not.toBeNull();
@@ -98,6 +98,12 @@ describe('web shell sidebar', () => {
     });
     expect(window.location.pathname).toBe('/monitor');
     expect(screen.queryByRole('menu', { name: 'More destinations' })).toBeNull();
+  });
+
+  it('labels the sixth tab More outside overflow sections', () => {
+    stubFetch(() => ({}));
+    render(<Sidebar slug="dashboard" />);
+    expect(screen.getByRole('button', { name: 'More' })).not.toBeNull();
   });
 
   it('exposes titles and port suffixes', () => {

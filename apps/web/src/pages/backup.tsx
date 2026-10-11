@@ -223,7 +223,8 @@ export function BackupPage(): ReactElement {
         </select>
       </div>
       <Card className="p-0">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[480px] text-sm">
           <tbody>
             {sorted.length === 0 ? (
               <tr>
@@ -259,6 +260,7 @@ export function BackupPage(): ReactElement {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
       <ConfirmDialog
         open={pendingRestore !== null}

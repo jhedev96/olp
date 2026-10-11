@@ -27,8 +27,9 @@ function cellText(value: unknown): string {
 export function ResultTable({ fields, rows, affected }: DbResult): ReactElement {
   if (rows.length === 0) return <p className="text-sm text-neutral-400">0 rows.</p>;
   return (
-    <div>
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto">
+      <div>
+        <table className="w-full text-sm">
         <thead>
           <tr>
             {fields.map((col) => (
@@ -54,6 +55,7 @@ export function ResultTable({ fields, rows, affected }: DbResult): ReactElement 
       {affected !== undefined && affected !== null && (
         <p className="mt-1 text-xs text-neutral-400">{affected} rows affected</p>
       )}
+    </div>
     </div>
   );
 }

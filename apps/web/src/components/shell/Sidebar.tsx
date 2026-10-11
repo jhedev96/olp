@@ -135,6 +135,7 @@ export function Sidebar({
 
   const host = typeof window === 'undefined' ? '' : window.location.host;
   const moreActive = MORE_ITEMS.some((item) => item.slug === slug);
+  const currentMore = MORE_ITEMS.find((item) => item.slug === slug);
   const goSlug = (target: Slug): void => {
     setMoreOpen(false);
     navigateTo(target);
@@ -236,7 +237,7 @@ export function Sidebar({
         })}
         <button
           type="button"
-          aria-label="More"
+          aria-label={currentMore ? currentMore.label : 'More'}
           aria-expanded={moreOpen}
           onClick={() => setMoreOpen((open) => !open)}
           className={
@@ -245,8 +246,8 @@ export function Sidebar({
               : 'flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-[11px] text-neutral-400 hover:bg-neutral-800'
           }
         >
-          <i data-lucide={moreOpen ? 'x' : 'more-horizontal'} className="h-5 w-5" />
-          More
+          <i data-lucide={currentMore ? currentMore.icon : moreOpen ? 'x' : 'more-horizontal'} className="h-5 w-5" />
+          {currentMore ? currentMore.label : 'More'}
         </button>
       </nav>
       {moreOpen && (

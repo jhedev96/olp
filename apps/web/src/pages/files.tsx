@@ -442,7 +442,8 @@ export function FilesPage(): ReactElement {
         ))}
       </div>
       <Card className="p-0">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
           <tbody>
             {dir !== '' && (
               <tr>
@@ -544,6 +545,7 @@ export function FilesPage(): ReactElement {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
       <div className="mt-3">
         <ComingSoon feature="Storage mounts & shortcuts" candidate="CAND-019" />
