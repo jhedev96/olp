@@ -11,13 +11,14 @@ import {
   Pencil,
   PencilLine,
   Trash2,
+  X,
   createIcons,
 } from 'lucide';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
 import type { EditorView } from '@codemirror/view';
 import { ConfirmDialog, PromptDialog } from '../components/common/Dialog.js';
-import { ComingSoon } from '../components/common/States.js';
+import { ComingSoon, EmptyState } from '../components/common/States.js';
 import { CodeEditor } from '../components/code/CodeEditor.js';
 import { CodePreview } from '../components/code/CodePreview.js';
 import { languageFor } from '../components/code/languages.js';
@@ -26,7 +27,7 @@ import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
 
 /** Tree-shaken icon set for this page (passed to `createIcons` per render). */
-const ICONS = { Archive, ArrowUp, Download, Eye, File: FileIcon, Folder, PackageOpen, Pencil, PencilLine, Trash2 };
+const ICONS = { Archive, ArrowUp, Download, Eye, File: FileIcon, Folder, PackageOpen, Pencil, PencilLine, Trash2, X };
 
 function Icon({ name, label }: { name: string; label: string }): ReactElement {
   return (
@@ -563,7 +564,10 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
             {visible.length === 0 && (
               <tr>
                 <td colSpan={5} className="text-neutral-400">
-                  {entries.length === 0 ? 'Empty folder' : 'No matches'}
+                  <EmptyState
+                    title={entries.length === 0 ? 'Empty folder' : 'No matches'}
+                    hint={entries.length === 0 ? undefined : 'Try another search.'}
+                  />
                 </td>
               </tr>
             )}
@@ -593,7 +597,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
                     {t.name}
                   </button>
                   <button type="button" aria-label={`Close ${t.name}`} className="hover:text-red-400" onClick={() => closeTab(i)}>
-                    ✕
+                    <i data-lucide="x" className="h-3 w-3" />
                   </button>
                 </span>
               ))}

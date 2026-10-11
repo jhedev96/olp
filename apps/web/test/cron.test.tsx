@@ -68,8 +68,6 @@ describe('web cron page', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('Add job'));
     });
-    console.log('DBG LEN:', calls.length, 'ISARR:', Array.isArray(calls), 'FIND:', typeof calls.find);
-    console.log('DBG URLS:', JSON.stringify(calls.map((c) => [typeof c.url, c.url])));
     const save = calls.find((c) => c.url === '/api/cron/jobs' && c.method === 'POST');
     expect(save?.body).toMatchObject({ name: 'j', schedule: '* * * * *', command: '/bin/a' });
   });

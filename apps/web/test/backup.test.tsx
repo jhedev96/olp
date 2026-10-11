@@ -33,8 +33,8 @@ describe('web backup page', () => {
       render(<BackupPage />);
     });
     const rows = screen.getAllByRole('row');
-    expect(rows[0]?.textContent).toContain('b1');
-    expect(rows[1]?.textContent).toContain('m1');
+    expect(rows[1]?.textContent).toContain('b1');
+    expect(rows[2]?.textContent).toContain('m1');
     expect(screen.getByText('2.0 KB')).not.toBeNull();
   });
 
