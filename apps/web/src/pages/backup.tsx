@@ -40,6 +40,9 @@ export function BackupPage(): ReactElement {
   const [pendingDelete, setPendingDelete] = useState<BackupRow | null>(null);
   const [diskFree, setDiskFree] = useState<number | null>(null);
   const [engines, setEngines] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [oldestFirst, setOldestFirst] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -125,9 +128,17 @@ export function BackupPage(): ReactElement {
     await load();
   };
 
-  const sorted = [...backups].sort((a, b) => b.created - a.created);
+  const q = query.trim().toLowerCase();
+  const sorted = [...backups]
+    .filter(
+      (b) =>
+        (typeFilter === 'all' || b.type === typeFilter) &&
+        (q === '' || b.name.toLowerCase().includes(q) || b.source.toLowerCase().includes(q)),
+    )
+    .sort((a, b) => (oldestFirst ? a.created - b.created : b.created - a.created));
   const totalSize = backups.reduce((sum, b) => sum + b.size, 0);
-  const newest = sorted[0];
+  const newest = [...backups].sort((a, b) => b.created - a.created)[0];
+  const dbCoverage = backups.filter((b) => b.type === 'mysql' || b.type === 'postgres').length;
   const engineReady = (id: string): boolean | null => (id in engines ? (engines[id] as boolean) : null);
 
   return (
@@ -137,6 +148,7 @@ export function BackupPage(): ReactElement {
         <Badge tone="info">
           {backups.length} archives · {fmtSize(totalSize)}
         </Badge>
+        {dbCoverage > 0 && <Badge tone="success">{dbCoverage} database dumps</Badge>}
         <span className="text-xs text-neutral-400">
           pool <span className="font-mono">backups/</span> · {diskFree === null ? 'free —' : `${fmtSize(diskFree)} free`}
         </span>
@@ -183,6 +195,32 @@ export function BackupPage(): ReactElement {
         <Button size="sm" onClick={() => void save()}>
           Create backup
         </Button>
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Filter snapshots…"
+          aria-label="Filter snapshots"
+          value={query}
+          onChange={(ev) => setQuery(ev.target.value)}
+          className="w-52"
+        />
+        {['all', 'folder', 'mysql', 'postgres'].map((type) => {
+          const count = type === 'all' ? backups.length : backups.filter((b) => b.type === type).length;
+          return (
+            <Button key={type} size="sm" variant={typeFilter === type ? 'default' : 'outline'} onClick={() => setTypeFilter(type)}>
+              {type === 'all' ? `All (${count})` : `${type} (${count})`}
+            </Button>
+          );
+        })}
+        <select
+          aria-label="Snapshot order"
+          className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+          value={oldestFirst ? 'oldest' : 'newest'}
+          onChange={(ev) => setOldestFirst(ev.target.value === 'oldest')}
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
       </div>
       <Card className="p-0">
         <table className="w-full text-sm">
