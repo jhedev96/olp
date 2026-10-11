@@ -27,8 +27,9 @@ function cellText(value: unknown): string {
 export function ResultTable({ fields, rows, affected }: DbResult): ReactElement {
   if (rows.length === 0) return <p className="text-sm text-neutral-400">0 rows.</p>;
   return (
-    <div>
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto">
+      <div>
+        <table className="w-full text-sm">
         <thead>
           <tr>
             {fields.map((col) => (
@@ -55,6 +56,7 @@ export function ResultTable({ fields, rows, affected }: DbResult): ReactElement 
         <p className="mt-1 text-xs text-neutral-400">{affected} rows affected</p>
       )}
     </div>
+    </div>
   );
 }
 
@@ -77,7 +79,26 @@ export function DatabasePage(): ReactElement {
   const [result, setResult] = useState<DbResult | { error: string } | null>(null);
   const [sql, setSql] = useState('');
   const [version, setVersion] = useState('');
+  const [copiedConn, setCopiedConn] = useState(false);
+  const [tableQuery, setTableQuery] = useState('');
 
+  /** Shell connection string composed from the loaded form (copyable). */
+  const connectionString = (): string => {
+    if (engine === 'mysql') {
+      return `mysql -u ${form.user !== '' ? form.user : 'root'} -p -h ${form.host !== '' ? form.host : '127.0.0.1'} -P ${form.port !== '' ? form.port : '3306'}${form.database !== '' ? ` ${form.database}` : ''}`;
+    }
+    return `psql -h ${form.host !== '' ? form.host : '127.0.0.1'} -p ${form.port !== '' ? form.port : '5432'} -U ${form.user !== '' ? form.user : 'postgres'}${form.database !== '' ? ` -d ${form.database}` : ''}`;
+  };
+
+  const copyConnection = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(connectionString());
+      setCopiedConn(true);
+      setTimeout(() => setCopiedConn(false), 1600);
+    } catch {
+      // clipboard blocked: the string stays visible for manual copy
+    }
+  };
   /** Best-effort server version via a version query (hidden on failure). */
   const fetchVersion = useCallback(async (next: Engine): Promise<void> => {
     try {
@@ -262,7 +283,7 @@ export function DatabasePage(): ReactElement {
       {connected && (
         <div className="grid gap-3 md:grid-cols-3">
           <Card>
-            <h2 className="mb-2 font-bold">Databases</h2>
+            <h2 className="mb-2 font-bold">Databases{databases.length > 0 ? ` (${databases.length})` : ''}</h2>
             <div className="flex flex-col gap-1">
               {databases.map((db) => (
                 <button key={db} type="button" className="text-left text-sm hover:text-green-400" onClick={() => void openTables(db)}>
@@ -273,17 +294,26 @@ export function DatabasePage(): ReactElement {
           </Card>
           <Card>
             <h2 className="mb-2 font-bold">Tables{tables !== null ? ` (${tables.db})` : ''}</h2>
+            <Input
+              placeholder="Filter tables…"
+              aria-label="Filter tables"
+              value={tableQuery}
+              onChange={(ev) => setTableQuery(ev.target.value)}
+              className="mb-2"
+            />
             <div className="flex flex-col gap-1">
-              {(tables?.list ?? []).map((table) => (
-                <button
-                  key={table}
-                  type="button"
-                  className="text-left text-sm hover:text-green-400"
-                  onClick={() => tables !== null && void browse(tables.db, table)}
-                >
-                  {table}
-                </button>
-              ))}
+              {(tables?.list ?? [])
+                .filter((table) => table.toLowerCase().includes(tableQuery.trim().toLowerCase()))
+                .map((table) => (
+                  <button
+                    key={table}
+                    type="button"
+                    className="text-left text-sm hover:text-green-400"
+                    onClick={() => tables !== null && void browse(tables.db, table)}
+                  >
+                    {table}
+                  </button>
+                ))}
             </div>
           </Card>
           <Card>
@@ -300,6 +330,9 @@ export function DatabasePage(): ReactElement {
             <div className="mt-2 flex items-center gap-2">
               <Button size="sm" onClick={() => void runQuery()}>
                 Run
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setSql('')}>
+                Clear
               </Button>
               <span className="text-xs text-neutral-500">Ctrl+Enter runs</span>
             </div>
@@ -323,6 +356,17 @@ export function DatabasePage(): ReactElement {
         <div className="mt-3">
           <ComingSoon feature="Schema sizes & DDL browser" candidate="CAND-026" />
         </div>
+      )}
+      {connected && (
+        <Card className="mt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="mr-auto font-bold">Connection string</h2>
+            <Button size="sm" variant="outline" onClick={() => void copyConnection()}>
+              {copiedConn ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+          <code className="mt-2 block truncate rounded bg-black/40 px-2 py-1 font-mono text-xs">{connectionString()}</code>
+        </Card>
       )}
     </main>
   );

@@ -114,9 +114,17 @@ describe('web backup page', () => {
       render(<BackupPage />);
     });
     expect(screen.getByText('2 archives · 2.1 KB')).not.toBeNull();
+    expect(screen.getByText('1 database dumps')).not.toBeNull();
     expect(screen.getByText('Directory zip: ready')).not.toBeNull();
     expect(screen.getByText('MySQL dump: missing')).not.toBeNull();
     expect(screen.getByText('Postgres snapshot: unknown')).not.toBeNull();
     expect(screen.getByText('CAND-029')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Filter snapshots'), { target: { value: 'm1' } });
+    expect(screen.queryByText('b1')).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /mysql \(\d+\)/ }));
+    });
+    expect(screen.queryByText('b1')).toBeNull();
+    expect(screen.getByText('m1')).not.toBeNull();
   });
 });

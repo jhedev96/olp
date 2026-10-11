@@ -217,4 +217,29 @@ describe('web files page', () => {
     fireEvent.change(screen.getByLabelText('Sort entries'), { target: { value: 'size' } });
     expect(screen.getByText('CAND-019')).not.toBeNull();
   });
+
+  it('shows bulk size, refreshes and discards edits', async () => {
+    const { calls } = stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    fireEvent.click(screen.getByLabelText('Select a.txt'));
+    expect(screen.getByText('Total size: 11 B')).not.toBeNull();
+    const before = calls.filter((c) => c.url.startsWith('/api/files?path=')).length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    });
+    expect(calls.filter((c) => c.url.startsWith('/api/files?path=')).length).toBe(before + 1);
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
+    });
+    expect(screen.getByText('UTF-8 · LF · 1 lines')).not.toBeNull();
+    const area = document.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.change(area, { target: { value: 'dirty' } });
+    expect(screen.getByText('UTF-8 · LF · 1 lines · edited')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    });
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('hello');
+  });
 });

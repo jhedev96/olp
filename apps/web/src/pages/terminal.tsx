@@ -6,6 +6,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { wsUrl } from '../lib/api.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
+import { Input } from '../components/ui/input.js';
 
 /** Mobile keymap (Terwo `TERM_KEYMAP` parity). */
 const KEYMAP: Record<string, string> = {
@@ -71,10 +72,10 @@ function defaultTerminal(): { term: TermLike; fit: { fit(): void } } {
  * Terminal page (mockup terminal parity): xterm + fit addon, WS `/term`
  * with `{t:'in'|'rs'|'new'}` protocol, pty/pipe badge, font-size
  * controls, connect/new/clear/paste buttons, right-click paste, mobile
- * keymap with sticky ctrl/alt. Honestly omitted (no source, backend
- * frozen): multi-tab sessions, split panes, per-tab TTY (CAND-017),
- * WS latency badge (CAND-018), kernel line of the MOTD (CAND-014 —
- * the art itself arrives via the server greeting).
+ * keymap with sticky ctrl/alt. Session tabs, split panes, per-tab TTY
+ * (CAND-017), WS latency (CAND-018), bell/cursor/theme controls, macro
+ * snippet runners (CAND-034), and the kernel line of the MOTD (CAND-014)
+ * stay out; the MOTD art itself arrives via the server greeting.
  */
 export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const createTerminal = deps.createTerminal ?? defaultTerminal;
@@ -84,6 +85,7 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const termRef = useRef<TermLike | null>(null);
   const fitRef = useRef<{ fit(): void } | null>(null);
   const wsRef = useRef<TermSocket | null>(null);
+  const connectRef = useRef<(() => void) | null>(null);
   const stickyRef = useRef({ ctrl: false, alt: false });
   const [status, setStatus] = useState('connecting…');
   const [pipe, setPipe] = useState(false);
@@ -92,6 +94,7 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const [alt, setAlt] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
   const [fontSize, setFontSize] = useState(14);
+  const [execCmd, setExecCmd] = useState('');
 
   useEffect(() => {
     const box = boxRef.current;
@@ -155,6 +158,7 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
       };
     };
     connect();
+    connectRef.current = connect;
 
     const observer =
       typeof ResizeObserver === 'function'
@@ -236,6 +240,22 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
     }
   };
 
+  const reconnect = (): void => {
+    try {
+      wsRef.current?.close();
+    } catch {
+      // already closed — connect below still runs
+    }
+    connectRef.current?.();
+  };
+
+  const execCommand = (): void => {
+    const cmd = execCmd.trim();
+    if (cmd === '') return;
+    setExecCmd('');
+    sendKey(`${cmd}\n`);
+  };
+
   const paste = async (): Promise<void> => {
     try {
       const text = await navigator.clipboard.readText();
@@ -287,10 +307,31 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
         <Button size="sm" variant="outline" onClick={() => void paste()}>
           Paste
         </Button>
+        <Button size="sm" variant="outline" onClick={reconnect}>
+          Reconnect
+        </Button>
         <Button size="sm" variant="destructive" onClick={createNew}>
           New session
         </Button>
       </div>
+      <form
+        className="flex gap-2"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          execCommand();
+        }}
+      >
+        <Input
+          placeholder="Send raw command to the shell…"
+          aria-label="Send raw command"
+          value={execCmd}
+          onChange={(ev) => setExecCmd(ev.target.value)}
+          className="flex-1 font-mono"
+        />
+        <Button size="sm" variant="outline" type="submit">
+          Exec
+        </Button>
+      </form>
       <ConfirmDialog
         open={confirmNew}
         title="New terminal session"

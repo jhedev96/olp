@@ -10,11 +10,13 @@ import {
   LayoutDashboard,
   LogOut,
   Moon,
+  MoreHorizontal,
   Settings,
   SquareTerminal,
   Store,
   Sun,
   Terminal,
+  X,
   createIcons,
 } from 'lucide';
 import { apiJson } from '../../lib/api.js';
@@ -34,11 +36,13 @@ const ICONS = {
   LayoutDashboard,
   LogOut,
   Moon,
+  MoreHorizontal,
   Settings,
   SquareTerminal,
   Store,
   Sun,
   Terminal,
+  X,
 };
 
 /**
@@ -60,6 +64,26 @@ export const NAV_ITEMS: ReadonlyArray<{ slug: Exclude<Slug, 'login'>; label: str
   { slug: 'monitor', label: 'Monitor', icon: 'activity' },
 ];
 
+/**
+ * Mobile bottom-bar tabs (mockup mobile parity: 5 primary + More).
+ * Short labels fit narrow phones; `data-path` keeps the OLP slug.
+ */
+export const MOBILE_TABS: ReadonlyArray<{ slug: Exclude<Slug, 'login'>; short: string; icon: string }> = [
+  { slug: 'dashboard', short: 'Dash', icon: 'layout-dashboard' },
+  { slug: 'website', short: 'Web', icon: 'globe' },
+  { slug: 'database', short: 'Data', icon: 'database' },
+  { slug: 'files', short: 'Files', icon: 'folder' },
+  { slug: 'terminal', short: 'Shell', icon: 'terminal' },
+];
+
+/** Overflow entries behind the mobile More sheet. */
+export const MORE_ITEMS: ReadonlyArray<{ slug: Exclude<Slug, 'login'>; label: string; icon: string }> = [
+  { slug: 'store', label: 'Store', icon: 'store' },
+  { slug: 'cron', label: 'Cron', icon: 'calendar-clock' },
+  { slug: 'backup', label: 'Backup', icon: 'archive' },
+  { slug: 'settings', label: 'Settings', icon: 'settings' },
+  { slug: 'monitor', label: 'Monitor', icon: 'activity' },
+];
 /** Page title per slug (header lookup, single source with the nav). */
 export function titleFor(slug: Slug): string {
   if (slug === 'login') return 'Login';
@@ -75,8 +99,9 @@ export function portSuffix(host: string): string {
 /**
  * App sidebar (mockup sidebar parity): brand block, online pill, nav,
  * theme toggle, quick-terminal shortcut, logout. Below `md` the rail
- * hides and the same items render as a scrollable bottom bar (no
- * overflow menu — every slug stays one tap away per the no-drop rule).
+ * hides and a 6-tab bottom bar takes over (mockup mobile parity: 5
+ * primary tabs + a More sheet with the rest, theme toggle, and logout
+ * — the rail-only controls stay reachable on phones).
  */
 export function Sidebar({
   slug,
@@ -91,6 +116,7 @@ export function Sidebar({
       window.location.href = url;
     });
   const [theme, setThemeState] = useState(getTheme);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     createIcons({ icons: ICONS });
@@ -108,6 +134,12 @@ export function Sidebar({
   };
 
   const host = typeof window === 'undefined' ? '' : window.location.host;
+  const moreActive = MORE_ITEMS.some((item) => item.slug === slug);
+  const currentMore = MORE_ITEMS.find((item) => item.slug === slug);
+  const goSlug = (target: Slug): void => {
+    setMoreOpen(false);
+    navigateTo(target);
+  };
   const link = (item: { slug: Slug; label: string; icon: string }): ReactElement => {
     const active = item.slug === slug;
     return (
@@ -122,7 +154,7 @@ export function Sidebar({
         }}
         className={
           active
-            ? 'flex items-center gap-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-300'
+            ? 'flex items-center gap-2 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-neutral-950'
             : 'flex items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800'
         }
       >
@@ -178,10 +210,86 @@ export function Sidebar({
       </aside>
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-50 flex gap-1 overflow-x-auto border-t border-neutral-800 bg-surface-lowest/95 px-2 py-2 backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 flex items-stretch justify-around border-t border-neutral-800 bg-surface-lowest/95 px-1 py-1 backdrop-blur md:hidden"
       >
-        {NAV_ITEMS.map(link)}
+        {MOBILE_TABS.map((item) => {
+          const active = item.slug === slug;
+          return (
+            <a
+              key={item.slug}
+              href={`/${item.slug}`}
+              data-path={item.slug}
+              aria-current={active ? 'page' : undefined}
+              onClick={(ev) => {
+                ev.preventDefault();
+                goSlug(item.slug);
+              }}
+              className={
+                active
+                  ? 'flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-emerald-300'
+                  : 'flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-[11px] text-neutral-400 hover:bg-neutral-800'
+              }
+            >
+              <i data-lucide={item.icon} className="h-5 w-5" />
+              {item.short}
+            </a>
+          );
+        })}
+        <button
+          type="button"
+          aria-label={currentMore ? currentMore.label : 'More'}
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((open) => !open)}
+          className={
+            moreActive || moreOpen
+              ? 'flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-emerald-300'
+              : 'flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-[11px] text-neutral-400 hover:bg-neutral-800'
+          }
+        >
+          <i data-lucide={currentMore ? currentMore.icon : moreOpen ? 'x' : 'more-horizontal'} className="h-5 w-5" />
+          {currentMore ? currentMore.label : 'More'}
+        </button>
       </nav>
+      {moreOpen && (
+        <div className="fixed inset-x-0 bottom-16 z-50 px-4 md:hidden">
+          <div role="menu" aria-label="More destinations" className="rounded-lg border border-neutral-700 bg-surface-low p-2 shadow-xl">
+            {MORE_ITEMS.map((item) => (
+              <a
+                key={item.slug}
+                href={`/${item.slug}`}
+                data-path={item.slug}
+                aria-current={item.slug === slug ? 'page' : undefined}
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  goSlug(item.slug);
+                }}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800"
+              >
+                <i data-lucide={item.icon} className="h-4 w-4" />
+                {item.label}
+              </a>
+            ))}
+            <div className="mt-1 flex items-center gap-2 border-t border-neutral-800 pt-2">
+              <button
+                type="button"
+                title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+                onClick={toggleTheme}
+                className="rounded-md p-2 text-neutral-300 hover:bg-neutral-800"
+              >
+                <i data-lucide={theme === 'light' ? 'moon' : 'sun'} className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                title="Logout"
+                onClick={() => void logout()}
+                className="rounded-md p-2 text-neutral-300 hover:bg-neutral-800"
+              >
+                <i data-lucide="log-out" className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

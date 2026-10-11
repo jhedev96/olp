@@ -209,11 +209,14 @@ export function StorePage(): ReactElement {
         </select>
       </div>
       <div className="mb-3 flex flex-wrap gap-1">
-        {['All', ...Array.from(new Set(items.map((i) => categoryOf(i.id))))].map((cat) => (
-          <Button key={cat} size="sm" variant={category === cat ? 'default' : 'outline'} onClick={() => setCategory(cat)}>
-            {cat}
-          </Button>
-        ))}
+        {['All', ...Array.from(new Set(items.map((i) => categoryOf(i.id))))].map((cat) => {
+          const count = cat === 'All' ? items.length : items.filter((i) => categoryOf(i.id) === cat).length;
+          return (
+            <Button key={cat} size="sm" variant={category === cat ? 'default' : 'outline'} onClick={() => setCategory(cat)}>
+              {cat} ({count})
+            </Button>
+          );
+        })}
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         {visible.length === 0 ? (

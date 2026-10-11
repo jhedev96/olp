@@ -144,4 +144,17 @@ describe('web settings page', () => {
     expect(screen.getByText('CAND-031')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Export JSON' })).not.toBeNull();
   });
+
+  it('meters password strength and documents daemon reload', async () => {
+    stubApi(() => ({ status: 200, json: SETTINGS }));
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    fireEvent.change(screen.getByPlaceholderText('New password'), { target: { value: 'short' } });
+    expect(screen.getByText('Weak')).not.toBeNull();
+    fireEvent.change(screen.getByPlaceholderText('New password'), { target: { value: 'Correct horse battery 9!' } });
+    expect(screen.getByText('Strong')).not.toBeNull();
+    expect(screen.getByText('pm2 restart olp')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy command' })).not.toBeNull();
+  });
 });

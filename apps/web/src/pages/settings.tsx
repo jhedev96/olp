@@ -7,6 +7,21 @@ import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
 
+/** Password strength (client-side length + class check, no backend). */
+export function passwordStrength(pw: string): 'Weak' | 'Medium' | 'Strong' {
+  let classes = 0;
+  if (/[a-z]/.test(pw)) classes++;
+  if (/[A-Z]/.test(pw)) classes++;
+  if (/[0-9]/.test(pw)) classes++;
+  if (/[^a-zA-Z0-9]/.test(pw)) classes++;
+  if (pw.length >= 16 && classes >= 3) return 'Strong';
+  if (pw.length >= 10 && classes >= 2) return 'Medium';
+  return 'Weak';
+}
+
+/** Daemon reload command (rebranded pm2 process name, static docs). */
+export const RELOAD_CMD = 'pm2 restart olp';
+
 /** Settings page inputs (tests inject navigation + timers). */
 export interface SettingsPageDeps {
   goto?: (url: string) => void;
@@ -46,6 +61,7 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
   const [toast, setToast] = useState('');
   const [copied, setCopied] = useState(false);
+  const [reloadCopied, setReloadCopied] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -162,6 +178,16 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
     }
   };
 
+  const copyReload = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(RELOAD_CMD);
+      setReloadCopied(true);
+      setTimeout(() => setReloadCopied(false), 1600);
+    } catch {
+      // clipboard blocked: the command stays visible for manual copy
+    }
+  };
+
   const logoutAll = (): void => {
     setConfirmLogoutAll(true);
   };
@@ -217,6 +243,11 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
             Save password
           </Button>
         </div>
+        {pw.next !== '' && (
+          <p className="mt-2 text-xs text-neutral-400">
+            Strength: <span className="font-semibold text-neutral-200">{passwordStrength(pw.next)}</span>
+          </p>
+        )}
       </Card>
 
       <Card className="mb-3">
@@ -264,6 +295,16 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         </Card>
         <ComingSoon feature="Active device sessions" candidate="CAND-030" />
         <ComingSoon feature="Server bind & bot status" candidate="CAND-031" />
+        <Card>
+          <h2 className="font-bold">Daemon reload</h2>
+          <p className="mt-1 text-xs text-neutral-500">Apply out-of-band config edits by restarting the service:</p>
+          <div className="mt-2 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded bg-black/40 px-2 py-1 font-mono text-xs">{RELOAD_CMD}</code>
+            <Button size="sm" variant="outline" onClick={() => void copyReload()}>
+              {reloadCopied ? 'Copied' : 'Copy command'}
+            </Button>
+          </div>
+        </Card>
       </div>
       <ConfirmDialog
         open={confirmLogoutAll}

@@ -8,5 +8,5 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "vite.config.ts", "vitest.config.ts"]
 }
