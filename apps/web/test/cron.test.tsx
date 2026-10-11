@@ -44,6 +44,7 @@ describe('web cron page', () => {
     expect(screen.getByText('Stopped')).not.toBeNull();
     expect(screen.getByText('Disable')).not.toBeNull();
     expect(screen.getByText('Enable')).not.toBeNull();
+    expect(screen.getAllByText('Copy')).toHaveLength(2);
   });
 
   it('uses presets and unlocks custom input', async () => {

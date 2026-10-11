@@ -109,6 +109,14 @@ export function CronPage(): ReactElement {
     await load();
   };
 
+  const copyCommand = async (command: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      // clipboard blocked: the command stays visible for manual copy
+    }
+  };
+
   const remove = (job: CronJobRow): void => {
     setPendingJob(job);
   };
@@ -203,40 +211,39 @@ export function CronPage(): ReactElement {
           <option value="disabled">Disabled only</option>
         </select>
       </div>
-      <Card className="p-0">
-        <table className="w-full text-sm">
-          <tbody>
-            {visible.length === 0 ? (
-              <tr>
-                <td className="text-neutral-400">{jobs.length === 0 ? 'No jobs yet' : 'No matches'}</td>
-              </tr>
-            ) : (
-              visible.map((job) => (
-                <tr key={job.id}>
-                  <td>{job.name}</td>
-                  <td className="font-mono text-xs text-neutral-400">{job.schedule}</td>
-                  <td className="font-mono text-xs text-neutral-400">{job.command}</td>
-                  <td>
-                    <span className={job.enabled ? 'text-green-400' : 'text-neutral-500'}>
-                      {job.enabled ? 'Enabled' : 'Stopped'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="outline" onClick={() => void toggle(job.id)}>
-                        {job.enabled ? 'Disable' : 'Enable'}
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void remove(job)}>
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </Card>
+      {visible.length === 0 ? (
+        <p className="text-sm text-neutral-400">{jobs.length === 0 ? 'No jobs yet' : 'No matches'}</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {visible.map((job) => (
+            <Card key={job.id}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-auto font-semibold">{job.name}</span>
+                <code className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-xs text-emerald-300">{job.schedule}</code>
+                <span className={job.enabled ? 'text-xs text-green-400' : 'text-xs text-neutral-500'}>
+                  {job.enabled ? 'Enabled' : 'Stopped'}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded bg-black/40 px-2 py-1 font-mono text-xs text-neutral-300">
+                  $ {job.command}
+                </code>
+                <Button size="sm" variant="ghost" onClick={() => void copyCommand(job.command)}>
+                  Copy
+                </Button>
+              </div>
+              <div className="mt-2 flex gap-1">
+                <Button size="sm" variant="outline" onClick={() => void toggle(job.id)}>
+                  {job.enabled ? 'Disable' : 'Enable'}
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void remove(job)}>
+                  Delete
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
       <ConfirmDialog
         open={pendingJob !== null}
         title="Delete cron job"

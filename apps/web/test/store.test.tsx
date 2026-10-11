@@ -98,7 +98,7 @@ describe('web store page', () => {
     expect(screen.getByText('Nginx')).not.toBeNull();
     fireEvent.change(screen.getByLabelText('Search packages'), { target: { value: '' } });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Runtimes & Langs' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Runtimes & Langs (1)' }));
     });
     expect(screen.queryByText('Nginx')).toBeNull();
     expect(screen.getByText('PHP')).not.toBeNull();
