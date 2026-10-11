@@ -147,4 +147,25 @@ describe('web database page', () => {
     expect((screen.getByPlaceholderText('Host (127.0.0.1)') as HTMLInputElement).value).toBe('pg.local');
     expect(calls.some((c) => c.url === '/api/db/postgres/config')).toBe(true);
   });
+
+  it('clears SQL, filters tables and shows the connection string', async () => {
+    stubApi((url) => baseHandler(url));
+    await act(async () => {
+      render(<DatabasePage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save & Connect'));
+    });
+    expect(screen.getByText('Databases (1)')).not.toBeNull();
+    expect(screen.getByText(/mysql -u root/)).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Filter tables'), { target: { value: 'zzz' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('appdb'));
+    });
+    expect(screen.queryByText('users')).toBeNull();
+    const area = screen.getByPlaceholderText('SELECT * FROM users LIMIT 10') as HTMLTextAreaElement;
+    fireEvent.change(area, { target: { value: 'SELECT 1' } });
+    fireEvent.click(screen.getByText('Clear'));
+    expect((screen.getByPlaceholderText('SELECT * FROM users LIMIT 10') as HTMLTextAreaElement).value).toBe('');
+  });
 });
