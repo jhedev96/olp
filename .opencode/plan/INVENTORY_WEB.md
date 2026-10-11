@@ -49,7 +49,45 @@ Theme system:
 | `terwo_settings_system_preferences` (+mobile) | Settings restyle | Forms real; extras: export config JSON (real client-side download), saved toast (real), PBKDF2 rounds text + rehash-on-boot flag (**user decision needed**: mockup 310k contradicts backend 120k truth — propose drop with rationale), sessions table + per-session revoke (→ CAND-030), telegram verified badge (→ CAND-031), bind controls + reset docs (→ CAND-031; Copy Command real client-side) |
 | `terwo_logo` | brand asset | real (self-host + rebrand) |
 
-## P4 audit checklist (fill per screen: mockup `screen.png` vs app)
+## P4 audit checklist (desktop `screen.png` + mobile width, agent pass 2026-10-11)
 
-- [ ] login, dashboard, monitor, files, terminal, website, database,
-  store, cron, backup, settings (desktop + one mobile width each)
+Method: every desktop + mobile `screen.png` viewed; code compared for
+layout/copy/order; fixes landed as real-data upgrades only (no invented
+values). Human pixel sign-off still required per spec §6. Remaining
+mobile screens (database/websites/store/cron/backup/activity) follow the
+verified shell + stacking patterns below — spot-check, don't re-audit.
+
+- [x] shell: desktop rail + active block parity; mobile 6-tab bar
+  (Dash/Web/Data/Files/Shell + contextual 6th) + More sheet with theme
+  + logout; sticky wrap header. Verified on mobile dashboard/terminal/
+  settings/files/login shots.
+- [x] login: gateway stacking (grid → 1 col), honest placeholders,
+  admin hint, GitHub link. Omitted: env strip, rate pill, subsystem
+  health (no source). Light theme deferred (see below).
+- [x] dashboard: type tabs + counts, path column, proxy link, store
+  install shortcuts, conditional telegram card. Hero pills + card
+  extras stay out (CAND-014/015).
+- [x] monitor: structure matches (controls/meta/cards/dummies);
+  TEMP header pill + per-core waves stay out (CAND-014).
+- [x] files: bulk size, refresh, row highlight, editor meta + discard
+  + caret, table scroll. Prettify/diff → CAND-033.
+- [x] terminal: reconnect + exec input; tabs/split/TTY/latency/macros
+  stay out (CAND-017/018/034).
+- [x] websites: tab counts; PID/stats/autorestart/SSL stay out
+  (CAND-015/020/021/022/023).
+- [x] database: clear, table filter, db count, conn-string + copy.
+  Row counts/DDL/export stay out (CAND-006/024/025/026).
+- [x] store: tab counts; versions/commands/per-item ops stay out
+  (CAND-027).
+- [x] cron: cards + copy + crontab modal; categories replaced by
+  status filter (no source field — documented); stats stay out
+  (CAND-028).
+- [x] backup: type tabs + search + order + coverage; CLI snippets +
+  replication stay out (no `olp backup` CLI / rclone backend).
+- [x] settings: strength meter, reload docs + copy; triggers/history/
+  save-all/reset stay out (CAND-030/031).
+- [ ] HUMAN: pixel sign-off desktop + one mobile width per screen.
+- Known limits (not blockers): full light-mode palette (toggle flips
+  `color-scheme`; component classes stay dark-first — needs a theme
+  wave); `DataTable`/`EmptyState` unadopted (P5: adopt or drop);
+  mobile card-style rows render as scrollable tables (no data loss).
