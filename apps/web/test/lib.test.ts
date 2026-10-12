@@ -131,8 +131,19 @@ describe('web lib/router', () => {
         pushed.push({ data, url });
       },
     };
-    navigate('files', history);
+    navigate('files', undefined, history);
     expect(pushed).toEqual([{ data: { slug: 'files' }, url: '/files' }]);
+  });
+
+  it('carries an optional query string', () => {
+    const pushed: Array<{ data: unknown; url: string | URL | null | undefined }> = [];
+    const history: HistoryLike = {
+      pushState: (data, _title, url) => {
+        pushed.push({ data, url });
+      },
+    };
+    navigate('files', 'path=%24PREFIX%2Fetc', history);
+    expect(pushed).toEqual([{ data: { slug: 'files' }, url: '/files?path=%24PREFIX%2Fetc' }]);
   });
 });
 

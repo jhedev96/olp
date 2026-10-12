@@ -128,7 +128,10 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
   }, []);
 
   useEffect(() => {
-    void load('');
+    // Deep-link entry (Store Configure buttons): the jail still
+    // validates — traversal answers an honest error, never a leak.
+    const initial = new URLSearchParams(window.location.search).get('path') ?? '';
+    void load(initial);
   }, [load]);
 
   useEffect(() => {

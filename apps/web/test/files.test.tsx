@@ -45,8 +45,7 @@ function filesHandler(url: string, body: unknown): { status: number; json: unkno
 }
 
 describe('web files page', () => {
-  it('lists entries with per-type actions', async () => {
-    stubApi(filesHandler);
+  it('lists entries with per-type actions', async () => {    stubApi(filesHandler);
     await act(async () => {
       render(<FilesPage />);
     });
@@ -56,6 +55,19 @@ describe('web files page', () => {
     expect(screen.getAllByText('View')).toHaveLength(2);
     expect(screen.getByText('Unzip')).not.toBeNull();
     expect(screen.getByText('11 B')).not.toBeNull();
+  });
+
+  it('honors the ?path= deep-link on mount', async () => {
+    const { calls } = stubApi(filesHandler);
+    window.history.pushState({}, '', '/files?path=docs');
+    try {
+      await act(async () => {
+        render(<FilesPage />);
+      });
+      expect(calls.some((c) => c.url === '/api/files?path=docs')).toBe(true);
+    } finally {
+      window.history.pushState({}, '', '/files');
+    }
   });
 
   it('navigates into directories and back up', async () => {
