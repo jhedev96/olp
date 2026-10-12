@@ -110,9 +110,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 13 — Daemon wave 3 (Services & Daemons, spec approved 2026-10-12)
 
-- [~] W3-00 planning: spec + tasks + todos (`SPECS/spec-daemon-wave.md`, `TASKS/phase-13-daemon-wave.md`)
-- [ ] W3-01 sysinfo daemon presence + tests
-- [ ] W3-02 server services routes + inject tests
-- [ ] W3-03 smoke extension + live ALL GREEN
-- [ ] W3-04 dashboard section wiring
-- [ ] W3-05 docs + CAND-005 close-out
+- [x] W3-00 planning: spec + tasks + todos (`SPECS/spec-daemon-wave.md`, `TASKS/phase-13-daemon-wave.md`)
+- [x] W3-01 sysinfo daemon presence + tests
+- [x] W3-02 server services routes + inject tests
+- [x] W3-03 smoke extension + live ALL GREEN
+- [x] W3-04 dashboard section wiring
+- [x] W3-05 docs + CAND-005 close-out

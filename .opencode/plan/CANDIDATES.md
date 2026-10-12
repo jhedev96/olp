@@ -11,7 +11,7 @@
 | CAND-002 | ~~Monitor: network RX/TX + sockets~~ | Shipped wave 1: `summary.net` + page spark/lists (CLOSED 2026-10-12) | Rates via sampler deltas; ring buffer client-side |
 | CAND-003 | ~~Monitor: per-core GHz + frequency wave~~ | Shipped wave 1: `summary.cpu.perCore[]` + page bars (CLOSED 2026-10-12) | 3-cluster grouping stays a frontend heuristic |
 | CAND-004 | ~~Monitor: kill runaway process~~ | Shipped wave 2: per-row Kill + `POST .../:pid/kill` under deny-by-default authz (CLOSED 2026-10-12) | Security-read the diff; TOCTOU accepted residual, TERM-first + dialog names pid+command |
-| CAND-005 | Dashboard: Services & Daemons section | NEW: daemon status+control endpoint (mariadb/pg/redis/cronie) or reuse `services` package server-side | Refined P0b: cards show ACTIVE/START per daemon; pairs with `pkgman`/`services` backend wave |
+| CAND-005 | ~~Dashboard: Services & Daemons section~~ | Shipped wave 3: presence status + best-effort START (CLOSED 2026-10-12) | STOP buttons, per-distro unit tables, auto-start stay out |
 | CAND-006 | Database: Create New Database button | NEW: `POST /api/db/:engine/databases` (CREATE DATABASE) | Small; needs privilege + validation design |
 | CAND-007 | ~~Backup extras beyond CRUD~~ | SUPERSEDED by P0e row detail + CAND-029 (closed 2026-10-10) | Catch-all emptied, do not reopen |
 | CAND-008 | ~~Unresolved P0 leftovers~~ | SUPERSEDED — P0 closed 2026-10-10 with zero TBD rows | Catch-all emptied, do not reopen |

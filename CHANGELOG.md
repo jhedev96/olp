@@ -25,6 +25,9 @@ Termux/Alpine/macOS hardware.
   KILL opt-in) under deny-by-default authz (never init/self/other
   users' processes as non-root; every decision audit-logged); per-row
   Kill behind ConfirmDialog. Smoke 32/32 on Linux.
+- Daemon wave 3: `GET /api/services` (presence-based ACTIVE per
+  daemon) + `POST /api/services/:id/start` (best-effort control,
+  honest errors); dashboard section wired. Smoke 36/36 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
