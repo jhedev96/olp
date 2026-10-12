@@ -14,6 +14,14 @@ Termux/Alpine/macOS hardware.
 
 ### Added
 
+- Monitor wave 1 (read-only): `GET /api/monitor/summary` (per-core
+  CPU %, temp, freq, model/kernel/arch, swap detail, disk I/O rates,
+  network interfaces + listening ports, battery) and
+  `GET /api/monitor/processes` (top-by-RSS with CPU shares, best-effort
+  PM2 rows); `/monitor` page wired (per-core bars, net spark from
+  polled rates, proc table, conditional PM2). Kill stays out (deferred
+  authz wave, CAND-004). Smoke 28/28 on Linux.
+
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
 - React + Vite + Tailwind SPA (10/10 slugs: login → settings).

@@ -7,10 +7,10 @@
 
 | ID | Feature (mockup screen) | Backend needed | Notes |
 |---|---|---|---|
-| CAND-001 | Monitor: process list + PM2 rows | NEW: process enumeration endpoint (`/api/monitor/processes`?) | Biggest dummy; design the endpoint in its wave |
-| CAND-002 | Monitor: network RX/TX + sockets | NEW: network I/O endpoint | Needs per-OS collection research (Linux `/proc/net`, others?) |
-| CAND-003 | Monitor: per-core GHz + frequency wave | EXTEND: per-core stats in sysinfo (currently load avg + count only) | Small extension, pairs with CAND-001 wave |
-| CAND-004 | Monitor: kill runaway process | NEW: privileged kill endpoint (authz design required — dangerous) | Security review mandatory before building |
+| CAND-001 | ~~Monitor: process list + PM2 rows~~ | Shipped wave 1: `GET /api/monitor/processes` + page table (CLOSED 2026-10-12) | PM2 rows best-effort (hidden when absent) |
+| CAND-002 | ~~Monitor: network RX/TX + sockets~~ | Shipped wave 1: `summary.net` + page spark/lists (CLOSED 2026-10-12) | Rates via sampler deltas; ring buffer client-side |
+| CAND-003 | ~~Monitor: per-core GHz + frequency wave~~ | Shipped wave 1: `summary.cpu.perCore[]` + page bars (CLOSED 2026-10-12) | 3-cluster grouping stays a frontend heuristic |
+| CAND-004 | Monitor: kill runaway process | NEW: privileged kill endpoint (authz design required — dangerous) | DEFERRED by decision — read-only wave first; own wave with authz design |
 | CAND-005 | Dashboard: Services & Daemons section | NEW: daemon status+control endpoint (mariadb/pg/redis/cronie) or reuse `services` package server-side | Refined P0b: cards show ACTIVE/START per daemon; pairs with `pkgman`/`services` backend wave |
 | CAND-006 | Database: Create New Database button | NEW: `POST /api/db/:engine/databases` (CREATE DATABASE) | Small; needs privilege + validation design |
 | CAND-007 | ~~Backup extras beyond CRUD~~ | SUPERSEDED by P0e row detail + CAND-029 (closed 2026-10-10) | Catch-all emptied, do not reopen |
@@ -20,7 +20,7 @@
 | CAND-011 | Header avatar / user profiles | NEW or dummy-forever (single-admin has no profiles) | From P0a shell read; likely permanent dummy |
 | CAND-012 | Self-hosted Geist + JetBrains Mono | none (asset weight decision) | System stack ships v1; revisit with size budget |
 | CAND-013 | Dashboard: live panel log tail (+copy/clear) | NEW: panel log tail endpoint (pm2/journald backends) | From P0b; pairs with watchdog-adjacent work, separate spec |
-| CAND-014 | Extended system telemetry (temp, freq, zram, net I/O, sockets, per-core, disk rates, model/kernel/arch) | NEW: telemetry endpoint(s), per-OS collection research | From P0b monitor read; biggest research item after processes |
+| CAND-014 | ~~Extended system telemetry (temp, freq, zram, net I/O, sockets, per-core, disk rates, model/kernel/arch)~~ | Shipped wave 1: `GET /api/monitor/summary` (CLOSED 2026-10-12) | Wakelock line dropped with record (no queryable source); FS label out (no portable source) |
 | CAND-015 | Per-site memory + engine version; panel self-restart | NEW: site process stats + restart endpoint (authz design) | From P0b dashboard read; self-restart needs privilege design |
 | CAND-016 | File mode/owner in listings + chmod editing | NEW: stat mode in file entries + chmod endpoint | From P0c files read (Chmod column, 0755/0644 strings, ACL card) |
 | CAND-017 | Terminal workspaces (multi-tab sessions, split panes, per-tab TTY) | NEW: multi-session manager + tab metadata (TTY, proc names) | From P0c terminal read; singleton manager today |

@@ -54,4 +54,37 @@ export async function getSystemInfo(
 export { getBattery } from './battery.js';
 export { cpuCores } from './cpu.js';
 export { getDisk, parseDf } from './disk.js';
-export type { BatteryInfo, CpuInfo, DiskInfo, MemInfo, SysDeps, SystemInfo } from './types.js';
+export {
+  createMonitorSampler,
+  sampleProcesses,
+  sampleSummary,
+  parseBtime,
+  parseCpuLine,
+  parseCpuModel,
+  parseMeminfo,
+  parseNetDev,
+  parsePidStat,
+  parsePidStatus,
+  parseTcpListening,
+  cpuPercent,
+} from './monitor.js';
+export type {
+  BatteryInfo,
+  CpuInfo,
+  DiskInfo,
+  MemInfo,
+  SysDeps,
+  SystemInfo,
+} from './types.js';
+export type {
+  CoreStat,
+  CpuDetail,
+  DiskIo,
+  MemDetail,
+  MonitorSampler,
+  MonitorSummary,
+  NetIface,
+  NetInfo,
+  Pm2Entry,
+  ProcEntry,
+} from './monitor.js';

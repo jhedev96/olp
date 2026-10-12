@@ -37,6 +37,7 @@ function baseDeps(overrides: Partial<SysDeps> = {}): SysDeps {
     freemem: () => 2 * 1024 * 1024 * 1024,
     hostname: () => 'olp-test',
     uptime: () => 3661.7,
+    arch: () => 'x64',
     exec: () => Promise.reject(new Error('not stubbed')),
     readDir: () => [],
     readFile: () => null,

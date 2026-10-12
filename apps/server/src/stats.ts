@@ -18,6 +18,7 @@ export function nodeDeps(): SysDeps {
     freemem: () => os.freemem(),
     hostname: () => os.hostname(),
     uptime: () => os.uptime(),
+    arch: () => os.arch(),
     exec: defaultExec,
     readDir: (dir) => fs.readdirSync(dir),
     readFile: (file) => {
