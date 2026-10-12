@@ -179,3 +179,10 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W10-01 prettier + format-code + line-diff + unit tests
 - [x] W10-02 files toolbar + diff panel + page tests
 - [x] W10-03 docs + CAND-033 close
+
+## Phase 21 — Terminal snippets wave 11 (client-side; spec approved 2026-10-12)
+
+- [~] W11-00 planning: spec + tasks + todos (`SPECS/spec-snippets-wave.md`, `TASKS/phase-21-snippets-wave.md`)
+- [ ] W11-01 snippets lib + unit matrix
+- [ ] W11-02 macros row + dialogs + page tests
+- [ ] W11-03 docs + CAND-034 close
