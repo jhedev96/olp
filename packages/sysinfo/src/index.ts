@@ -53,6 +53,8 @@ export async function getSystemInfo(
 
 export { getBattery } from './battery.js';
 export { cpuCores } from './cpu.js';
+export { DAEMONS, scanDaemons } from './daemons.js';
+export type { DaemonDef } from './daemons.js';
 export { getDisk, parseDf } from './disk.js';
 export { decideKill } from './kill.js';
 export type { KillDeps, KillSignal, KillVerdict } from './kill.js';
