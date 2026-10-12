@@ -257,7 +257,8 @@ describe('server auth routes', () => {
     });
     expect((listB.json().sessions as Array<Record<string, unknown>>).map((r) => r['current'])).toEqual([false, true]);
 
-    // preHandler touch refreshes metadata: a new UA rewrites the caller's own row.
+    // preHandler touch refreshes lastSeen + IP but never rewrites the
+    // creation identity (per-request UA variance must not flicker rows).
     await app.inject({ method: 'GET', url: '/api/auth/sessions', headers: { cookie: cookieA, 'user-agent': 'curl/8.5.0' } });
     const relisted = await app.inject({
       method: 'GET',
@@ -266,7 +267,7 @@ describe('server auth routes', () => {
       remoteAddress: '10.2.2.2',
     });
     const mine = (relisted.json().sessions as Array<Record<string, unknown>>).find((r) => r['current'] === false);
-    expect(mine).toMatchObject({ browser: 'Unknown', os: 'Unknown' });
+    expect(mine).toMatchObject({ browser: 'Chrome 124.0.0.0', os: 'macOS 10.15.7', ip: '127.0.0.1' });
 
     expect((await app.inject({ method: 'GET', url: '/api/auth/sessions' })).statusCode).toBe(401);
   });
@@ -446,5 +447,37 @@ describe('server auth routes', () => {
     expect(map.take(state, 1000)).toBeNull();
     const old = map.issue('old', 1000);
     expect(map.take(old, 1000 + 5 * 60 * 1000 + 1)).toBeNull();
+  });
+
+  it('grants loopback local login and denies the rest', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir, passkeyOps: fakePasskeys() });
+
+    const local = await app.inject({ method: 'POST', url: '/api/login/local' });
+    expect(local.json()).toEqual({ ok: true });
+    const cookie = sessionCookie(local);
+    expect(cookie).toMatch(/^tpsid=[0-9a-f]{64}$/);
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(200);
+    const rows = (
+      await app.inject({ method: 'GET', url: '/api/auth/sessions', headers: { cookie } })
+    ).json().sessions as Array<{ browser: string; current: boolean }>;
+    expect(rows.find((r) => r.current)?.browser).toBe('Local login');
+
+    const lan = await app.inject({ method: 'POST', url: '/api/login/local', remoteAddress: '192.168.1.50' });
+    expect(lan.statusCode).toBe(403);
+    expect(lan.json()).toEqual({ error: 'Local login is only available from this machine (loopback)' });
+
+    // Forged proxy headers change nothing (req.ip is the direct peer).
+    const forged = await app.inject({
+      method: 'POST',
+      url: '/api/login/local',
+      remoteAddress: '192.168.1.50',
+      headers: { 'x-forwarded-for': '127.0.0.1' },
+    });
+    expect(forged.statusCode).toBe(403);
+
+    const v6 = await app.inject({ method: 'POST', url: '/api/login/local', remoteAddress: '::1' });
+    expect(v6.json()).toEqual({ ok: true });
   });
 });

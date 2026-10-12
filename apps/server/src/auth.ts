@@ -80,6 +80,8 @@ function isPublicRoute(path: string, method: string): boolean {
   if (method === 'POST' && (path === '/api/auth/passkey/login/options' || path === '/api/auth/passkey/login/verify')) {
     return true;
   }
+  // Local login mints sessions too (loopback-gated inside the handler).
+  if (method === 'POST' && path === '/api/login/local') return true;
   return false;
 }
 
@@ -122,6 +124,11 @@ function ceremonyError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const first = message.split('\n')[0] ?? '';
   return first === '' ? 'Passkey ceremony failed' : first.slice(0, CEREMONY_ERROR_MAX);
+}
+
+/** Loopback peers (direct socket only — proxy headers never trusted). */
+export function isLoopback(ip: string): boolean {
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
 /** RP identity from the request (no proxy in front — direct values only). */
@@ -336,6 +343,20 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
     }
     // Passkey sessions are always 24h (remember-me stays a password-login feature).
     reply.header('Set-Cookie', loginCookie(ctx.store.create(requestMeta(req))));
+    return { ok: true };
+  });
+
+  app.post('/api/login/local', { bodyLimit: 1024 }, async (req, reply) => {
+    // Strict loopback on the DIRECT socket peer (`req.ip` ignores
+    // `X-Forwarded-For` by default — forged headers change nothing).
+    // ACCEPTED RESIDUAL (spec §10): any localhost process, including
+    // other phone apps, can use this. LAN URLs fail closed here.
+    if (!isLoopback(req.ip)) {
+      reply.code(403);
+      return { error: 'Local login is only available from this machine (loopback)' };
+    }
+    const meta = requestMeta(req);
+    reply.header('Set-Cookie', loginCookie(ctx.store.create({ ...meta, browser: 'Local login' })));
     return { ok: true };
   });
 }
