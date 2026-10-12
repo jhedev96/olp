@@ -90,6 +90,24 @@ check('monitor summary shape', typeof summary.hostname === 'string' && typeof su
 const procs = json('GET', '/api/monitor/processes?limit=5');
 check('monitor processes shape', Array.isArray(procs.processes) && procs.processes.length > 0 && procs.processes.length <= 5 && typeof procs.processes[0].pid === 'number' && 'pm2' in procs && typeof procs.truncated === 'boolean');
 
+// monitor kill (privileged wave 2, same-box sleep victim)
+check('monitor kill 401', execSync(`curl -s -o /dev/null -w '%{http_code}' -X POST ${BASE}/api/monitor/processes/1/kill -H 'Content-Type: application/json' -d '{}'`, { encoding: 'utf8' }) === '401');
+check('monitor kill denies init', json('POST', '/api/monitor/processes/1/kill', {}).error === 'Refusing to kill init');
+const sleeper = execSync('sleep 300 >/dev/null 2>&1 & echo $!', { encoding: 'utf8' }).trim();
+check('monitor kill TERM', json('POST', `/api/monitor/processes/${sleeper}/kill`, {}).ok === true);
+let gone = false;
+try {
+  execSync(`kill -0 ${sleeper}`);
+} catch {
+  gone = true;
+}
+check('monitor kill gone', gone);
+try {
+  execSync(`kill -9 ${sleeper}`);
+} catch {
+  // already gone — the point
+}
+
 // terminal WS over real pipe shell
 const { default: WebSocket } = await import('ws');
 const cookie = execSync(`grep tpsid ${cj} | awk '{print $6"=" $7}' | tail -1`, { encoding: 'utf8' }).trim();

@@ -54,6 +54,8 @@ export async function getSystemInfo(
 export { getBattery } from './battery.js';
 export { cpuCores } from './cpu.js';
 export { getDisk, parseDf } from './disk.js';
+export { decideKill } from './kill.js';
+export type { KillDeps, KillSignal, KillVerdict } from './kill.js';
 export {
   createMonitorSampler,
   sampleProcesses,

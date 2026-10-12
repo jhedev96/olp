@@ -139,6 +139,9 @@ apps/web/src/pages/monitor.tsx          # per-row Kill + dialog (W2-04)
   returns `failed` where `process.kill` semantics differ — documented).
 - Root panels (`getuid() === 0`): owner check skipped by design —
   acceptable because the API adds no privilege beyond the process.
+- PID-reuse TOCTOU (list → confirm → kill): inherent to pid-based
+  kill; mitigated by TERM-first default + the dialog naming pid AND
+  command. Accepted residual risk, recorded here.
 
 ## 10. Decisions (locked 2026-10-12, human)
 

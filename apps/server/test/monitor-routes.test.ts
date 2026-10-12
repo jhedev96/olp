@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Environment } from '@olp/env-core';
 import { hashPassword } from '@olp/auth';
+import type { KillDeps } from '@olp/sysinfo';
 import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
@@ -58,6 +59,18 @@ function fakeDeps(): SysDeps {
       return null;
     },
     now: () => 1728470400000,
+  };
+}
+
+function fakeKill(code: string | null = null): KillDeps {
+  return {
+    selfPid: () => 100,
+    selfUid: () => 1000,
+    targetUid: () => 1000,
+    sendSignal: (pid) => {
+      if (code === 'ESRCH') throw Object.assign(new Error('no such'), { code });
+      if (pid === 100) throw new Error('should have been denied first');
+    },
   };
 }
 
@@ -170,5 +183,46 @@ describe('server monitor routes', () => {
     expect(clamped.json().processes).toHaveLength(1);
     const one = await app.inject({ method: 'GET', url: '/api/monitor/processes?limit=bogus', headers: { cookie } });
     expect(one.json().processes).toHaveLength(1);
+  });
+
+  it('gates the kill route with 401', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: fakeDeps(), monitorKill: fakeKill() });
+    expect((await app.inject({ method: 'POST', url: '/api/monitor/processes/200/kill' })).statusCode).toBe(401);
+  });
+
+  it('kills with TERM by default and validates signal', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: fakeDeps(), monitorKill: fakeKill(), root: '/' });
+    const cookie = await authedCookie(app);
+    const kill = (pid: string, body?: unknown) =>
+      app.inject({ method: 'POST', url: `/api/monitor/processes/${pid}/kill`, headers: { cookie }, payload: body });
+    const ok = await kill('200');
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true, pid: 200, signal: 'TERM' });
+    const badSignal = await kill('200', { signal: 'HUP' });
+    expect(badSignal.statusCode).toBe(400);
+    expect(badSignal.json()).toEqual({ error: 'Signal must be TERM or KILL' });
+    const badPid = await kill('abc');
+    expect(badPid.statusCode).toBe(400);
+    expect(badPid.json()).toEqual({ error: 'Invalid process id' });
+  });
+
+  it('denies init, self, and maps gone', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const gone = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: fakeDeps(), monitorKill: fakeKill('ESRCH'), root: '/' });
+    const cookie = await authedCookie(gone.app);
+    const kill = (pid: string) =>
+      gone.app.inject({ method: 'POST', url: `/api/monitor/processes/${pid}/kill`, headers: { cookie } });
+    expect((await kill('1')).statusCode).toBe(403);
+    expect((await kill('1')).json()).toEqual({ error: 'Refusing to kill init' });
+    expect((await kill('100')).statusCode).toBe(403);
+    expect((await kill('100')).json()).toEqual({ error: 'Refusing to kill the panel itself' });
+    const missing = await kill('200');
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ error: 'Process is already gone' });
   });
 });
