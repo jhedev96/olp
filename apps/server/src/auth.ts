@@ -1,18 +1,19 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   SessionStore,
   changePassword,
   changeUsername,
   clearCookie,
-  loadConfig,
   loginCookie,
+  loadConfig,
+  parseUserAgent,
   saveConfig,
   sessionTokenFromHeader,
   verifyCredentials,
 } from '@olp/auth';
-import type { AuthConfig } from '@olp/auth';
+import type { AuthConfig, SessionMeta } from '@olp/auth';
 
 /** Resolved credential directories. */
 export interface ServerDirs {
@@ -68,6 +69,18 @@ function requestPath(url: string): string {
   return url.split('?')[0] ?? '';
 }
 
+/**
+ * Parsed client metadata for the sessions table. The raw User-Agent
+ * is parsed at the boundary and dropped (never stored); the IP is
+ * the direct peer (`req.ip` — `X-Forwarded-For` is never trusted,
+ * no proxy sits in front of the panel).
+ */
+function requestMeta(req: Pick<FastifyRequest, 'headers' | 'ip'>): SessionMeta {
+  const header = req.headers['user-agent'];
+  const parsed = parseUserAgent(typeof header === 'string' ? header : '');
+  return { browser: parsed.browser, os: parsed.os, ip: req.ip };
+}
+
 interface LoginBody {
   username?: unknown;
   password?: unknown;
@@ -93,10 +106,15 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
     const path = requestPath(req.url);
     if (isPublicRoute(path, req.method)) return;
     if (!path.startsWith('/api/')) return;
-    if (!ctx.store.validate(sessionTokenFromHeader(req.headers.cookie))) {
+    const token = sessionTokenFromHeader(req.headers.cookie);
+    if (!ctx.store.validate(token)) {
       reply.code(401);
       await reply.send({ error: 'Not logged in' });
+      return;
     }
+    // Refresh last-seen metadata on every authed request (in-memory
+    // Map write, negligible for a single admin; never throws).
+    ctx.store.touch(token, requestMeta(req));
   });
 
   app.post('/api/login', { bodyLimit: 1048576 }, async (req, reply) => {
@@ -105,7 +123,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
       reply.code(401);
       return { error: 'Invalid username or password' };
     }
-    reply.header('Set-Cookie', loginCookie(ctx.store.create()));
+    reply.header('Set-Cookie', loginCookie(ctx.store.create(requestMeta(req))));
     return { ok: true };
   });
 
@@ -145,5 +163,31 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
   app.post('/api/auth/logout-all', async () => {
     ctx.store.revokeAll();
     return { ok: true };
+  });
+
+  app.get('/api/auth/sessions', async (req) => ({
+    sessions: ctx.store.list(sessionTokenFromHeader(req.headers.cookie)),
+  }));
+
+  // Static before parametric (store-wave lesson): manager-style ops
+  // must never collide with `:id` (plus a test proving it).
+  app.post('/api/auth/sessions/others/revoke', async (req) => ({
+    ok: true,
+    revoked: ctx.store.revokeOthers(sessionTokenFromHeader(req.headers.cookie)),
+  }));
+
+  app.post('/api/auth/sessions/:id/revoke', async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const token = sessionTokenFromHeader(req.headers.cookie);
+    const result = ctx.store.revokeById(id, token);
+    if (result === null) {
+      reply.code(404);
+      return { error: 'Unknown session' };
+    }
+    // Crafted self-revoke stays honest: the session dies and the
+    // orphaned cookie is cleared so the client lands on login.
+    if (result.self) reply.header('Set-Cookie', clearCookie());
+    return { ok: true, self: result.self };
   });
 }
