@@ -41,6 +41,12 @@ Termux/Alpine/macOS hardware.
   archive upload import, scheduled snapshots with ticker; page wired
   (badges, toggle, upload, schedules). Full-system bundle splits to
   CAND-035. Smoke 49/49 on Linux.
+- Store wave 7: `GET /api/install/versions` (parallel probes,
+  installed-gated, honest nulls), `POST/GET update + upgrade`
+  (manager-native, shared log machinery), `GET /api/install/mirror`
+  (Termux-honest, nulls elsewhere → CAND-036); list gains additive
+  `conf`; page wired (versions, ops buttons, Configure `?path=`
+  deep-link, installed-only, mirror card). Smoke 55/55 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
