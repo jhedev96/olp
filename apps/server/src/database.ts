@@ -52,6 +52,26 @@ export interface DbDriver {
   listTables(cfg: DbConfig, db: string): Promise<string[]>;
   previewRows(cfg: DbConfig, db: string, table: string): Promise<DbResult>;
   close(conn: DbConn): Promise<void>;
+  /** CREATE DATABASE (short-lived conn, identifier-escaped). */
+  createDatabase(cfg: DbConfig, name: string): Promise<void>;
+  /** Per-table rows (approximate on InnoDB/pg) + byte sizes. */
+  tableStats(cfg: DbConfig, db: string): Promise<TableStat[]>;
+  /** Exact DDL where the engine exposes it, else exact columns. */
+  tableDef(cfg: DbConfig, db: string, table: string): Promise<TableDef>;
+}
+
+/** Per-table size/count row (rows may be engine-estimated). */
+export interface TableStat {
+  name: string;
+  rows: number | null;
+  dataBytes: number | null;
+  indexBytes: number | null;
+}
+
+/** Table definition (ddl null where the engine exposes no exact text). */
+export interface TableDef {
+  ddl: string | null;
+  columns: Array<{ name: string; type: string; nullable: boolean; def: string | null }> | null;
 }
 
 /** Persisted credential registry (`db.json` in production, memory in tests). */
@@ -202,6 +222,55 @@ export function mysqlDriver(): DbDriver {
     close: async (conn) => {
       await asMysql(conn).end();
     },
+    createDatabase: async (cfg, name) => {
+      const conn = await open({ ...cfg, database: '' }, 8000);
+      try {
+        await conn.query('CREATE DATABASE ??', [name]);
+      } finally {
+        await conn.end().catch(() => '');
+      }
+    },
+    tableStats: async (cfg, db) => {
+      const conn = await open({ ...cfg, database: '' }, 5000);
+      try {
+        const [rows] = await conn.query(
+          'SELECT table_name AS t, table_rows AS r, data_length AS d, index_length AS x FROM information_schema.tables WHERE table_schema=? ORDER BY table_name',
+          [db],
+        );
+        return (rows as Array<{ t: string; r: number | null; d: number | null; x: number | null }>).map((r) => ({
+          name: r.t,
+          rows: typeof r.r === 'number' ? r.r : null,
+          dataBytes: typeof r.d === 'number' ? r.d : null,
+          indexBytes: typeof r.x === 'number' ? r.x : null,
+        }));
+      } finally {
+        await conn.end().catch(() => '');
+      }
+    },
+    tableDef: async (cfg, db, table) => {
+      const conn = await open({ ...cfg, database: '' }, 5000);
+      try {
+        const [created] = await conn.query('SHOW CREATE TABLE ??.??', [db, table]);
+        const ddlRow = (created as Array<Record<string, unknown>>)[0];
+        if (ddlRow === undefined) throw new Error('Table not found');
+        const ddlText = String(Object.values(ddlRow)[1] ?? '');
+        const [cols] = await conn.query(
+          'SELECT column_name AS n, column_type AS t, is_nullable AS nu, column_default AS d FROM information_schema.columns WHERE table_schema=? AND table_name=? ORDER BY ordinal_position',
+          [db, table],
+        );
+        return {
+          ddl: ddlText === '' ? null : ddlText,
+          columns: (cols as Array<{ n: string; t: string; nu: string; d: unknown }>).map((c) => ({
+            name: c.n,
+            type: c.t,
+            nullable: c.nu === 'YES',
+            def: c.d === null || c.d === undefined ? null : String(c.d),
+          })),
+        };
+      } finally {
+        await conn.end().catch(() => '');
+      }
+    },
   };
 }
 
@@ -273,6 +342,46 @@ export function pgDriver(): DbDriver {
     close: async (conn) => {
       await asPg(conn).end();
     },
+    createDatabase: async (cfg, name) => {
+      const client = await open(cfg, 'postgres', 8000);
+      try {
+        await client.query(`CREATE DATABASE ${quotePgIdent(name)}`);
+      } finally {
+        await client.end().catch(() => '');
+      }
+    },
+    tableStats: async (cfg, db) =>
+      withDb(cfg, db, async (client) => {
+        const result = await client.query(
+          `SELECT relname AS t, reltuples::bigint AS r, pg_relation_size(oid) AS d, pg_indexes_size(oid) AS x
+           FROM pg_class WHERE relkind = 'r' AND relnamespace NOT IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
+           ORDER BY relname`,
+        );
+        return (result.rows as Array<{ t: string; r: string | number | null; d: string | number | null; x: string | number | null }>).map((r) => ({
+          name: r.t,
+          rows: r.r === null ? null : Number(r.r),
+          dataBytes: r.d === null ? null : Number(r.d),
+          indexBytes: r.x === null ? null : Number(r.x),
+        }));
+      }),
+    tableDef: async (cfg, db, table) =>
+      withDb(cfg, db, async (client) => {
+        const result = await client.query(
+          `SELECT column_name AS n, data_type AS t, is_nullable AS nu, column_default AS d
+           FROM information_schema.columns WHERE table_catalog = $1 AND table_name = $2
+           ORDER BY ordinal_position`,
+          [db, table],
+        );
+        return {
+          ddl: null,
+          columns: (result.rows as Array<{ n: string; t: string; nu: string; d: unknown }>).map((c) => ({
+            name: c.n,
+            type: c.t,
+            nullable: c.nu === 'YES',
+            def: c.d === null || c.d === undefined ? null : String(c.d),
+          })),
+        };
+      }),
   };
 }
 
