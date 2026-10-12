@@ -4,6 +4,9 @@ export const COOKIE_NAME = 'tpsid';
 /** Session cookie lifetime in seconds (mirrors `SESSION_TTL_MS`). */
 export const SESSION_MAX_AGE = 86400;
 
+/** Remembered cookie lifetime in seconds (mirrors `REMEMBER_TTL_MS` — drift is a bug). */
+export const REMEMBER_MAX_AGE = 30 * 86400;
+
 /**
  * Parse a `Cookie` header into a name/value map.
  * Malformed entries are skipped (never throws).
@@ -25,9 +28,9 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out;
 }
 
-/** Serialize the login cookie (flags byte-identical to Terwo). */
-export function loginCookie(token: string): string {
-  return `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`;
+/** Serialize the login cookie (flags byte-identical to Terwo; age pairs with the session TTL). */
+export function loginCookie(token: string, maxAgeSec: number = SESSION_MAX_AGE): string {
+  return `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}`;
 }
 
 /** Serialize the logout (expired) cookie. */
