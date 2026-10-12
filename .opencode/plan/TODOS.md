@@ -145,3 +145,12 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W6-05 smoke extension + live ALL GREEN
 - [x] W6-06 frontend wiring
 - [x] W6-07 docs + CAND-029 close + CAND-035 open
+
+## Phase 17 — Store extras wave 7 (versions, update/upgrade, conf, mirror; spec approved 2026-10-12)
+
+- [~] W7-00 planning: spec + tasks + todos (`SPECS/spec-store-wave.md`, `TASKS/phase-17-store-wave.md`)
+- [ ] W7-01 pkgman versionCmd/conf + manager commands + tests
+- [ ] W7-02 server versions/update/upgrade/mirror + tests
+- [ ] W7-03 smoke extension + live ALL GREEN
+- [ ] W7-04 frontend wiring
+- [ ] W7-05 docs + CAND-027 close + CAND-036 open
