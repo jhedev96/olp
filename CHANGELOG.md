@@ -62,6 +62,10 @@ Termux/Alpine/macOS hardware.
   (lazy per-parser chunks) + hand-rolled LCS line diff; toolbar
   wired (Prettify/Diff beside Discard/Save, failure inline,
   unsupported disabled); no smoke (no backend surface).
+- Terminal snippets wave 11 (client-side, no backend): macros row
+  (6 rebranded presets + custom localStorage snippets, one-tap
+  `sendKey`) with destructive-confirm guard + inline add/delete;
+  no smoke (no backend surface).
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
