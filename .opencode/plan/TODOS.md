@@ -101,9 +101,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 12 — Kill wave 2 (privileged kill, spec approved 2026-10-12)
 
-- [~] W2-00 planning: spec + tasks + todos (`SPECS/spec-kill-wave.md`, `TASKS/phase-12-kill-wave.md`)
-- [ ] W2-01 sysinfo kill helper + verdict tests
-- [ ] W2-02 server kill route + inject tests
-- [ ] W2-03 smoke extension + live ALL GREEN
-- [ ] W2-04 frontend per-row Kill wiring
-- [ ] W2-05 docs + CAND-004 close-out
+- [x] W2-00 planning: spec + tasks + todos (`SPECS/spec-kill-wave.md`, `TASKS/phase-12-kill-wave.md`)
+- [x] W2-01 sysinfo kill helper + verdict tests
+- [x] W2-02 server kill route + inject tests
+- [x] W2-03 smoke extension + live ALL GREEN
+- [x] W2-04 frontend per-row Kill wiring
+- [x] W2-05 docs + CAND-004 close-out

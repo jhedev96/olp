@@ -21,6 +21,10 @@ Termux/Alpine/macOS hardware.
   PM2 rows); `/monitor` page wired (per-core bars, net spark from
   polled rates, proc table, conditional PM2). Kill stays out (deferred
   authz wave, CAND-004). Smoke 28/28 on Linux.
+- Kill wave 2: `POST /api/monitor/processes/:pid/kill` (TERM default,
+  KILL opt-in) under deny-by-default authz (never init/self/other
+  users' processes as non-root; every decision audit-logged); per-row
+  Kill behind ConfirmDialog. Smoke 32/32 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
