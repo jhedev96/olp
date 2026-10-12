@@ -83,6 +83,13 @@ check('proxy list empty', Array.isArray(json('GET', '/api/nginx/proxies').proxie
 check('cron stopped here', json('GET', '/api/cron/status').running === false);
 check('backup zip hint honest', json('POST', '/api/backups', { type: 'folder', name: 'x', source: 'smoke' }).error.includes('zip'));
 
+// monitor wave 1 (read-only telemetry)
+check('monitor summary 401', execSync(`curl -s -o /dev/null -w '%{http_code}' ${BASE}/api/monitor/summary`, { encoding: 'utf8' }) === '401');
+const summary = json('GET', '/api/monitor/summary');
+check('monitor summary shape', typeof summary.hostname === 'string' && typeof summary.arch === 'string' && summary.cpu && Array.isArray(summary.cpu.perCore) && summary.mem && summary.net && Array.isArray(summary.net.listeningPorts));
+const procs = json('GET', '/api/monitor/processes?limit=5');
+check('monitor processes shape', Array.isArray(procs.processes) && procs.processes.length > 0 && procs.processes.length <= 5 && typeof procs.processes[0].pid === 'number' && 'pm2' in procs && typeof procs.truncated === 'boolean');
+
 // terminal WS over real pipe shell
 const { default: WebSocket } = await import('ws');
 const cookie = execSync(`grep tpsid ${cj} | awk '{print $6"=" $7}' | tail -1`, { encoding: 'utf8' }).trim();
