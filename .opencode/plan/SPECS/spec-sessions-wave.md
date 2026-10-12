@@ -34,7 +34,7 @@ export class SessionStore {
   create(meta: SessionMeta, now?: number): string;   // token (secret, 64-hex, unchanged)
   touch(token: unknown, meta: SessionMeta, now?: number): boolean;
   list(currentToken?: unknown, now?: number): SessionInfo[];  // tokens never included
-  revokeById(id: string, now?: number): { revoked: boolean; self: boolean } | null; // null = unknown id
+  revokeById(id: string, currentToken?: unknown, now?: number): { revoked: boolean; self: boolean } | null; // null = unknown id
   revokeOthers(currentToken: unknown, now?: number): number;
   // validate/revoke/revokeAll/prune/size unchanged
 }

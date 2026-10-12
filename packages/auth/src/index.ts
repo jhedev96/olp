@@ -24,6 +24,9 @@ export {
   changePassword,
 } from './config.js';
 export { SESSION_TTL_MS, SessionStore } from './sessions.js';
+export type { SessionInfo, SessionMeta } from './sessions.js';
+export { parseUserAgent } from './user-agent.js';
+export type { ParsedAgent } from './user-agent.js';
 export {
   COOKIE_NAME,
   SESSION_MAX_AGE,

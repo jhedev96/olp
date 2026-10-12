@@ -11,6 +11,7 @@ import {
   loadConfig,
   loginCookie,
   parseCookies,
+  parseUserAgent,
   saveConfig,
   sessionTokenFromHeader,
   timingSafeEq,
@@ -157,10 +158,12 @@ describe('config', () => {
 });
 
 describe('sessions', () => {
+  const META = { browser: 'Chrome 124.0', os: 'macOS 14.4', ip: '192.168.1.104' };
+
   it('creates unique hex tokens and validates', () => {
     const store = new SessionStore();
-    const a = store.create(1000);
-    const b = store.create(1000);
+    const a = store.create(META, 1000);
+    const b = store.create(META, 1000);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(a).not.toBe(b);
     expect(store.validate(a, 1000)).toBe(true);
@@ -171,7 +174,7 @@ describe('sessions', () => {
 
   it('expires absolutely with lazy delete', () => {
     const store = new SessionStore();
-    const t = store.create(1000);
+    const t = store.create(META, 1000);
     expect(store.validate(t, 1000 + SESSION_TTL_MS)).toBe(true);
     expect(store.validate(t, 1000 + SESSION_TTL_MS + 1)).toBe(false);
     expect(store.size).toBe(0);
@@ -179,15 +182,89 @@ describe('sessions', () => {
 
   it('prunes, revokes, and clears', () => {
     const store = new SessionStore();
-    const a = store.create(1000);
-    store.create(1000);
-    store.create(5000);
+    const a = store.create(META, 1000);
+    store.create(META, 1000);
+    store.create(META, 5000);
     expect(store.prune(1000 + SESSION_TTL_MS + 1)).toBe(2);
     expect(store.size).toBe(1);
     store.revoke(a);
     expect(store.size).toBe(1);
     store.revokeAll();
     expect(store.size).toBe(0);
+  });
+
+  it('lists live sessions with ids, flags, and no tokens', () => {
+    const store = new SessionStore();
+    const a = store.create(META, 1000);
+    const b = store.create({ ...META, ip: '192.168.1.185' }, 2000);
+    const rows = store.list(a, 3000);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ browser: 'Chrome 124.0', ip: '192.168.1.104', created: 1000, lastSeen: 1000, current: true });
+    expect(rows[1]).toMatchObject({ ip: '192.168.1.185', current: false });
+    expect(rows[0]?.id).toMatch(/^[0-9a-f]{8}$/);
+    expect(rows[0]?.id).not.toBe(rows[1]?.id);
+    // Tokens never serialize (scan the whole payload for 64-hex secrets).
+    const dumped = JSON.stringify(rows);
+    expect(dumped).not.toContain(a);
+    expect(dumped).not.toContain(b);
+    expect(dumped).not.toMatch(/[0-9a-f]{64}/);
+  });
+
+  it('touches last-seen metadata and drops dead tokens', () => {
+    const store = new SessionStore();
+    const a = store.create(META, 1000);
+    expect(store.touch(a, { ...META, ip: '10.0.0.9' }, 9000)).toBe(true);
+    expect(store.list(a, 9000)[0]).toMatchObject({ lastSeen: 9000, ip: '10.0.0.9' });
+    expect(store.touch('missing', META, 9000)).toBe(false);
+    expect(store.touch(42, META, 9000)).toBe(false);
+    expect(store.touch(a, META, 1000 + SESSION_TTL_MS + 1)).toBe(false);
+    expect(store.size).toBe(0);
+  });
+
+  it('revokes by id with self detection and others with counts', () => {
+    const store = new SessionStore();
+    const a = store.create(META, 1000);
+    store.create(META, 1000);
+    const ids = store.list(null, 1000).map((r) => r.id);
+    expect(store.revokeById('deadbeef', a, 1000)).toBeNull();
+    expect(store.revokeById(ids[1] ?? '', a, 1000)).toEqual({ revoked: true, self: false });
+    expect(store.size).toBe(1);
+    expect(store.revokeById(ids[0] ?? '', a, 1000)).toEqual({ revoked: true, self: true });
+    expect(store.size).toBe(0);
+  });
+
+  it('revokes others keeping the caller', () => {
+    const store = new SessionStore();
+    const a = store.create(META, 1000);
+    store.create(META, 1000);
+    store.create(META, 1000);
+    expect(store.revokeOthers(a, 2000)).toBe(2);
+    expect(store.list(a, 2000)).toHaveLength(1);
+    expect(store.revokeOthers('ghost', 2000)).toBe(1);
+    expect(store.size).toBe(0);
+  });
+});
+
+describe('user-agent parser', () => {
+  it('parses flagship browsers and systems', () => {
+    expect(
+      parseUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.119 Safari/537.36'),
+    ).toEqual({ browser: 'Chrome 124.0.6367.119', os: 'macOS 10.15.7' });
+    expect(
+      parseUserAgent('Mozilla/5.0 (Android 14; Mobile; rv:126.0) Gecko/126.0 Firefox/126.0'),
+    ).toEqual({ browser: 'Firefox 126.0 Mobile', os: 'Android 14' });
+    expect(
+      parseUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'),
+    ).toEqual({ browser: 'Safari 17.4 Mobile', os: 'iOS 17.4' });
+    expect(
+      parseUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.2478.80'),
+    ).toEqual({ browser: 'Edge 124.0.2478.80', os: 'Windows 10.0' });
+  });
+
+  it('answers Unknown for empty and garbage input', () => {
+    expect(parseUserAgent('')).toEqual({ browser: 'Unknown', os: 'Unknown' });
+    expect(parseUserAgent('curl/8.5.0')).toEqual({ browser: 'Unknown', os: 'Unknown' });
+    expect(parseUserAgent('(((not a ua)))')).toEqual({ browser: 'Unknown', os: 'Unknown' });
   });
 });
 

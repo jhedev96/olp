@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { fmtAgo } from '../lib/format.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
+import { Badge } from '../components/common/Badge.js';
 import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
@@ -22,6 +24,17 @@ export function passwordStrength(pw: string): 'Weak' | 'Medium' | 'Strong' {
 /** Daemon reload command (rebranded pm2 process name, static docs). */
 export const RELOAD_CMD = 'pm2 restart olp';
 
+/** `/api/auth/sessions` row shape (server contract). */
+export interface SessionRow {
+  id: string;
+  browser: string;
+  os: string;
+  ip: string;
+  created: number;
+  lastSeen: number;
+  current: boolean;
+}
+
 /** Settings page inputs (tests inject navigation + timers). */
 export interface SettingsPageDeps {
   goto?: (url: string) => void;
@@ -36,8 +49,8 @@ export interface SettingsPageDeps {
  * Honestly omitted (no source, backend frozen): PBKDF2 rounds text and
  * rehash-on-boot flag (the flag has no cryptographic effect and the
  * mockup's 310k contradicts the real 120k — CAND-031 decision pending),
- * device sessions table (CAND-030), bind controls + verified badge
- * (CAND-031).
+ * bind controls + verified badge (CAND-031). Device sessions are real
+ * (parsed-only in-memory metadata, CAND-030 closed wave 8).
  */
 export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const goto =
@@ -59,6 +72,9 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [tg, setTg] = useState({ botToken: '', chatId: '', enabled: false, commandsEnabled: true });
   const [tgMessage, setTgMessage] = useState('');
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [pendingRevoke, setPendingRevoke] = useState<SessionRow | null>(null);
+  const [confirmOthers, setConfirmOthers] = useState(false);
   const [toast, setToast] = useState('');
   const [copied, setCopied] = useState(false);
   const [reloadCopied, setReloadCopied] = useState(false);
@@ -87,6 +103,45 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadSessions = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ sessions: SessionRow[] }>('/api/auth/sessions');
+      if (Array.isArray(body.sessions)) setSessions(body.sessions);
+    } catch {
+      // sessions card keeps the previous render
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  const confirmRevokeAction = async (): Promise<void> => {
+    if (pendingRevoke === null) return;
+    const target = pendingRevoke;
+    setPendingRevoke(null);
+    try {
+      const body = await apiJson<{ ok?: unknown; self?: unknown }>(`/api/auth/sessions/${target.id}/revoke`, {
+        method: 'POST',
+      });
+      // No Revoke button on the current row, but a crafted id could
+      // still hit self: land on login instead of a dead table.
+      if (body.self === true) {
+        goto('/login');
+        return;
+      }
+    } catch {
+      // the table keeps its rows on failure (Terwo parity)
+    }
+    await loadSessions();
+  };
+
+  const confirmOthersAction = async (): Promise<void> => {
+    setConfirmOthers(false);
+    await apiJson('/api/auth/sessions/others/revoke', { method: 'POST' }).catch(() => undefined);
+    await loadSessions();
+  };
 
   const saveUsername = async (): Promise<void> => {
     setUserError('');
@@ -293,7 +348,43 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
           </div>
           <p className="mt-1 text-xs text-neutral-500">Snapshots the loaded panel config, bot token included — store it safely.</p>
         </Card>
-        <ComingSoon feature="Active device sessions" candidate="CAND-030" />
+        <Card>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h2 className="mr-auto font-bold">Active device sessions</h2>
+            <Badge tone="info">
+              {sessions.length} connected
+            </Badge>
+            {sessions.some((s) => !s.current) && (
+              <Button size="sm" variant="outline" onClick={() => setConfirmOthers(true)}>
+                Log out other sessions
+              </Button>
+            )}
+          </div>
+          {sessions.length === 0 ? (
+            <p className="text-sm text-neutral-400">No active sessions.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {sessions.map((session) => (
+                <li key={session.id} className="flex flex-wrap items-center gap-2 rounded border border-neutral-800 px-2 py-1.5 text-sm">
+                  <span className="mr-auto min-w-0">
+                    <span className="font-medium">{session.browser}</span>
+                    <span className="block font-mono text-xs text-neutral-400">
+                      {session.ip} • {session.os} • {fmtAgo(session.lastSeen)}
+                    </span>
+                  </span>
+                  <span className="text-xs text-green-400">Active</span>
+                  {session.current ? (
+                    <Badge tone="success">THIS DEVICE</Badge>
+                  ) : (
+                    <Button size="sm" variant="destructive" onClick={() => setPendingRevoke(session)}>
+                      Revoke
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
         <ComingSoon feature="Server bind & bot status" candidate="CAND-031" />
         <Card>
           <h2 className="font-bold">Daemon reload</h2>
@@ -314,6 +405,24 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         destructive={true}
         onConfirm={() => void confirmLogoutAllAction()}
         onCancel={() => setConfirmLogoutAll(false)}
+      />
+      <ConfirmDialog
+        open={pendingRevoke !== null}
+        title="Revoke session"
+        message={`Revoke the session from ${pendingRevoke?.browser ?? ''} (${pendingRevoke?.ip ?? ''})? That device will need to log in again.`}
+        confirmLabel="Revoke"
+        destructive={true}
+        onConfirm={() => void confirmRevokeAction()}
+        onCancel={() => setPendingRevoke(null)}
+      />
+      <ConfirmDialog
+        open={confirmOthers}
+        title="Log out other sessions"
+        message="Log out all sessions except this device? Other devices will need to log in again."
+        confirmLabel="Log out others"
+        destructive={true}
+        onConfirm={() => void confirmOthersAction()}
+        onCancel={() => setConfirmOthers(false)}
       />
     </main>
   );

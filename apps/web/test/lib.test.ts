@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api, apiJson, wsUrl } from '../src/lib/api.js';
-import { esc, fmtDate, fmtSize, fmtUptime } from '../src/lib/format.js';
+import { esc, fmtAgo, fmtDate, fmtSize, fmtUptime } from '../src/lib/format.js';
 import { navigate, slugFromPath } from '../src/lib/router.js';
 import type { HistoryLike } from '../src/lib/router.js';
 import { getTheme, setTheme } from '../src/lib/theme.js';
@@ -106,6 +106,17 @@ describe('web lib/format', () => {
     expect(fmtUptime(90)).toBe('1m');
     expect(fmtUptime(3661)).toBe('1h 1m');
     expect(fmtUptime(90061)).toBe('1d 1h');
+  });
+
+  it('formats relative ago times', () => {
+    const now = 1728470400000;
+    expect(fmtAgo(now, now)).toBe('just now');
+    expect(fmtAgo(now - 30000, now)).toBe('just now');
+    expect(fmtAgo(now - 5 * 60000, now)).toBe('5m ago');
+    expect(fmtAgo(now - 2 * 3600000, now)).toBe('2h ago');
+    expect(fmtAgo(now - 30 * 3600000, now)).toBe('Yesterday');
+    expect(fmtAgo(now - 3 * 86400000, now)).toBe('3d ago');
+    expect(fmtAgo(now + 60000, now)).toBe('just now');
   });
 
   it('escapes markup', () => {
