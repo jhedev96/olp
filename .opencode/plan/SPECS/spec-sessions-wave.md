@@ -59,8 +59,9 @@ export class SessionStore {
   accepted). Tokens stay 64-hex secrets and never serialize.
 - `list` lazy-prunes expired entries first (validate precedent), so
   the table never shows dead rows.
-- `touch` refreshes lastSeen AND browser/os/ip (network or UA switch
-  mid-session shows last-seen truth, not stale creation data).
+- `touch` refreshes lastSeen + IP only (creation browser/OS stay
+  stable, so per-request UA variance never flickers rows and login
+  method markers persist — refined W12-03, was full-meta refresh).
 - Static `others/revoke` registers before parametric `:id/revoke`
   (store-wave lesson) + a test proving no `Unknown session` collision.
 - Unknown-id revoke answers 404 (backup-schedule precedent, not the

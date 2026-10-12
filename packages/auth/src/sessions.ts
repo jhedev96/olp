@@ -94,17 +94,16 @@ export class SessionStore {
   }
 
   /**
-   * Refresh a session's last-seen metadata (login UA/IP evolve:
-   * network or browser switches show last-seen truth, not stale
-   * creation data). Dead or absent tokens report `false` (never
-   * throws, no throw paths by construction).
+   * Refresh a session's last-seen time and IP (network moves show
+   * last-seen truth). Creation browser/OS stay untouched: they
+   * identify the device (and the login method marker), so per-request
+   * UA variance must never rewrite them. Dead or absent tokens
+   * report `false` (never throws, no throw paths by construction).
    */
   touch(token: unknown, meta: SessionMeta, now: number = Date.now()): boolean {
     const found = this.live(token, now);
     if (found === null) return false;
     found.session.lastSeen = now;
-    found.session.browser = meta.browser;
-    found.session.os = meta.os;
     found.session.ip = meta.ip;
     return true;
   }

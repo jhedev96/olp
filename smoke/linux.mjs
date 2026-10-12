@@ -136,6 +136,17 @@ check(
   bind.host === '127.0.0.1' && bind.port === Number(new URL(BASE).port) && bind.loopback === true,
 );
 check('remember session revoked', json('POST', `/api/auth/sessions/${rrow.id}/revoke`).ok === true);
+
+// passkey + local wave 12 (options shapes live; full ceremony needs a
+// real authenticator — human gate, see TODOS phase 22)
+const regOpts = json('POST', '/api/auth/passkey/register/options');
+check(
+  'passkey register options shape',
+  typeof regOpts.options === 'object' && typeof regOpts.options.challenge === 'string' && typeof regOpts.state === 'string',
+);
+check('passkey login needs keys', json('POST', '/api/auth/passkey/login/options').error === 'No passkeys registered');
+const localRes = execSync(`curl -s -c /tmp/olp-smoke-cj4.txt -X POST ${BASE}/api/login/local`, { encoding: 'utf8' });
+check('local login ok', JSON.parse(localRes).ok === true);
 check('store list has nginx', json('GET', '/api/install').items.some((i) => i.id === 'nginx'));
 
 // store extras wave 7 (versions, update, mirror — honest fail allowed offline, hang never)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
-import { fmtAgo, fmtIn } from '../lib/format.js';
+import { fmtAgo, fmtDate, fmtIn } from '../lib/format.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Badge } from '../components/common/Badge.js';
 import { Button } from '../components/ui/button.js';
@@ -33,6 +33,13 @@ export interface SessionRow {
   lastSeen: number;
   expiresAt: number;
   current: boolean;
+}
+
+/** `/api/auth/passkeys` row shape (server contract). */
+export interface PasskeyRow {
+  id: string;
+  name: string;
+  created: number;
 }
 
 /** `/api/settings` bind shape (server contract). */
@@ -85,6 +92,10 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [confirmOthers, setConfirmOthers] = useState(false);
   const [botName, setBotName] = useState<string | null | undefined>(undefined);
   const [bind, setBind] = useState<BindState | null>(null);
+  const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
+  const [keyName, setKeyName] = useState('');
+  const [keyMessage, setKeyMessage] = useState('');
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<PasskeyRow | null>(null);
   const [toast, setToast] = useState('');
   const [copied, setCopied] = useState(false);
   const [reloadCopied, setReloadCopied] = useState(false);
@@ -128,6 +139,58 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   useEffect(() => {
     void loadIdentity();
   }, [loadIdentity]);
+
+  const loadKeys = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ passkeys: PasskeyRow[] }>('/api/auth/passkeys');
+      if (Array.isArray(body.passkeys)) setPasskeys(body.passkeys);
+    } catch {
+      // passkeys card keeps the previous render
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadKeys();
+  }, [loadKeys]);
+
+  const registerKey = async (): Promise<void> => {
+    setKeyMessage('');
+    const creds = (
+      window.navigator as unknown as {
+        credentials?: { create(o: unknown): Promise<unknown> };
+      }
+    ).credentials;
+    if (creds === undefined) {
+      setKeyMessage('Passkeys are not supported in this browser');
+      return;
+    }
+    try {
+      const opts = await apiJson<{ options?: unknown; state?: unknown }>('/api/auth/passkey/register/options', {
+        method: 'POST',
+      });
+      if (typeof opts.state !== 'string') throw new Error('Bad ceremony state');
+      const attestation = await creds.create({ publicKey: opts.options });
+      const body = await apiJson<{ ok?: unknown; error?: string }>('/api/auth/passkey/register/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: opts.state, name: keyName.trim(), response: attestation }),
+      });
+      if (body.ok === true) {
+        setKeyName('');
+        await loadKeys();
+      } else setKeyMessage(typeof body.error === 'string' ? body.error : 'Registration failed');
+    } catch (err) {
+      setKeyMessage(err instanceof ApiError || err instanceof Error ? err.message : 'Registration failed');
+    }
+  };
+
+  const confirmDeleteKeyAction = async (): Promise<void> => {
+    if (pendingDeleteKey === null) return;
+    const target = pendingDeleteKey;
+    setPendingDeleteKey(null);
+    await apiJson(`/api/auth/passkeys/${target.id}`, { method: 'DELETE' }).catch(() => undefined);
+    await loadKeys();
+  };
 
   const loadSessions = useCallback(async (): Promise<void> => {
     try {
@@ -424,6 +487,46 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         </Card>
         <Card>
           <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h2 className="mr-auto font-bold">Passkeys</h2>
+            <Badge tone="info">
+              {passkeys.length} registered
+            </Badge>
+          </div>
+          {keyMessage !== '' && (
+            <p role="alert" className="mb-2 text-sm text-red-400">
+              {keyMessage}
+            </p>
+          )}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Key name (e.g. YubiKey 5)"
+              aria-label="New passkey name"
+              value={keyName}
+              onChange={(ev) => setKeyName(ev.target.value)}
+              className="w-52"
+            />
+            <Button size="sm" onClick={() => void registerKey()}>
+              Register passkey
+            </Button>
+          </div>
+          {passkeys.length === 0 ? (
+            <p className="text-sm text-neutral-400">No passkeys yet — password sign-in always works.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {passkeys.map((key) => (
+                <li key={key.id} className="flex flex-wrap items-center gap-2 rounded border border-neutral-800 px-2 py-1.5 text-sm">
+                  <span className="mr-auto font-medium">{key.name === '' ? key.id.slice(0, 12) : key.name}</span>
+                  <span className="font-mono text-xs text-neutral-400">{fmtDate(key.created)}</span>
+                  <Button size="sm" variant="destructive" onClick={() => setPendingDeleteKey(key)}>
+                    Delete
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+        <Card>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <h2 className="mr-auto font-bold">Bind address</h2>
             {bind !== null &&
               (bind.loopback ? (
@@ -480,6 +583,15 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         destructive={true}
         onConfirm={() => void confirmOthersAction()}
         onCancel={() => setConfirmOthers(false)}
+      />
+      <ConfirmDialog
+        open={pendingDeleteKey !== null}
+        title="Delete passkey"
+        message={`Delete the passkey "${pendingDeleteKey?.name === '' ? (pendingDeleteKey?.id.slice(0, 12) ?? '') : (pendingDeleteKey?.name ?? '')}"? Password sign-in keeps working.`}
+        confirmLabel="Delete"
+        destructive={true}
+        onConfirm={() => void confirmDeleteKeyAction()}
+        onCancel={() => setPendingDeleteKey(null)}
       />
     </main>
   );

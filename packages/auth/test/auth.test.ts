@@ -88,7 +88,7 @@ describe('password', () => {
 });
 
 describe('config', () => {
-  const cfg: AuthConfig = { username: 'admin', salt: 's'.repeat(32), hash: hashPassword('pw12345', 's'.repeat(32)) };
+  const cfg: AuthConfig = { username: 'admin', salt: 's'.repeat(32), hash: hashPassword('pw12345', 's'.repeat(32)), passkeys: [] };
 
   it('loads an existing config', () => {
     const io = memIo({ '/d/config.json': JSON.stringify(cfg) });
@@ -116,6 +116,43 @@ describe('config', () => {
     expect(res.config).toEqual(cfg);
     expect(io.store['/new/config.json']).toBe(legacy);
     expect(io.modes).toContain('/new/config.json');
+  });
+
+  it('tolerates old files without passkeys and drops garbage rows', () => {
+    const bare = loadConfig('/d', { io: memIo({ '/d/config.json': JSON.stringify({ username: 'a', salt: 's', hash: 'h' }) }) });
+    expect(bare.config.passkeys).toEqual([]);
+    const messy = loadConfig(
+      '/d',
+      {
+        io: memIo({
+          '/d/config.json': JSON.stringify({
+            username: 'a',
+            salt: 's',
+            hash: 'h',
+            passkeys: [
+              { id: 'k1', publicKey: 'pk1', counter: 3, name: 'key', created: 9 },
+              { id: '', publicKey: 'pk' },
+              { id: 'k2' },
+              'junk',
+              null,
+            ],
+          }),
+        }),
+      },
+    );
+    expect(messy.config.passkeys).toEqual([{ id: 'k1', publicKey: 'pk1', counter: 3, name: 'key', created: 9 }]);
+  });
+
+  it('round-trips passkeys and preserves them across password change', () => {
+    const withKey: AuthConfig = {
+      ...cfg,
+      passkeys: [{ id: 'k1', publicKey: 'pk1', counter: 0, name: 'key', created: 1 }],
+    };
+    const io = memIo({});
+    saveConfig('/d', withKey, io);
+    expect(loadConfig('/d', { io }).config.passkeys).toEqual(withKey.passkeys);
+    const changed = changePassword(withKey, 'pw12345', 'newpass99', 'newpass99');
+    expect('config' in changed && changed.config.passkeys).toEqual(withKey.passkeys);
   });
 
   it('generates first-run credentials with one-time plaintext', () => {

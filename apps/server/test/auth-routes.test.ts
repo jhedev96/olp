@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { REMEMBER_TTL_MS, SESSION_TTL_MS, hashPassword } from '@olp/auth';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
+import type { PasskeyOps } from '../src/passkey.js';
 
 const KNOWN_PASSWORD = 'testpass1';
 
@@ -29,6 +30,23 @@ function sessionCookie(res: { headers: Record<string, unknown> }): string {
   const raw = res.headers['set-cookie'];
   const first = Array.isArray(raw) ? raw[0] : (raw as string);
   return (first ?? '').split(';')[0] ?? '';
+}
+
+function fakePasskeys(): PasskeyOps {
+  const bad = (response: unknown): boolean =>
+    typeof response === 'object' && response !== null && (response as Record<string, unknown>)['bad'] === true;
+  return {
+    registrationOptions: ({ username, rpId, excludeIds }) =>
+      Promise.resolve({ options: { challenge: 'reg-chal', rpId, user: username, exclude: excludeIds }, challenge: 'reg-chal' }),
+    verifyRegistration: ({ response }) =>
+      bad(response)
+        ? Promise.reject(new Error('bad attestation\nsecond line'))
+        : Promise.resolve({ id: 'cred-1', publicKey: 'cGsx', counter: 0 }),
+    authenticationOptions: ({ allowIds, rpId }) =>
+      Promise.resolve({ options: { challenge: 'auth-chal', allow: allowIds, rpId }, challenge: 'auth-chal' }),
+    verifyAuthentication: ({ response }) =>
+      bad(response) ? Promise.reject(new Error('bad assertion')) : Promise.resolve({ counter: 7 }),
+  };
 }
 
 describe('server auth routes', () => {
@@ -239,7 +257,8 @@ describe('server auth routes', () => {
     });
     expect((listB.json().sessions as Array<Record<string, unknown>>).map((r) => r['current'])).toEqual([false, true]);
 
-    // preHandler touch refreshes metadata: a new UA rewrites the caller's own row.
+    // preHandler touch refreshes lastSeen + IP but never rewrites the
+    // creation identity (per-request UA variance must not flicker rows).
     await app.inject({ method: 'GET', url: '/api/auth/sessions', headers: { cookie: cookieA, 'user-agent': 'curl/8.5.0' } });
     const relisted = await app.inject({
       method: 'GET',
@@ -248,7 +267,7 @@ describe('server auth routes', () => {
       remoteAddress: '10.2.2.2',
     });
     const mine = (relisted.json().sessions as Array<Record<string, unknown>>).find((r) => r['current'] === false);
-    expect(mine).toMatchObject({ browser: 'Unknown', os: 'Unknown' });
+    expect(mine).toMatchObject({ browser: 'Chrome 124.0.0.0', os: 'macOS 10.15.7', ip: '127.0.0.1' });
 
     expect((await app.inject({ method: 'GET', url: '/api/auth/sessions' })).statusCode).toBe(401);
   });
@@ -300,5 +319,165 @@ describe('server auth routes', () => {
 
     expect((await app.inject({ method: 'POST', url: '/api/auth/sessions/others/revoke' })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/auth/sessions/deadbeef/revoke' })).statusCode).toBe(401);
+  });
+
+  it('registers, lists, and deletes passkeys with guards', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir, passkeyOps: fakePasskeys() });
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'tester', password: KNOWN_PASSWORD } });
+    const cookie = sessionCookie(login);
+
+    expect((await app.inject({ method: 'POST', url: '/api/auth/passkey/register/options' })).statusCode).toBe(401);
+    const opts = await app.inject({ method: 'POST', url: '/api/auth/passkey/register/options', headers: { cookie } });
+    expect(opts.statusCode).toBe(200);
+    expect(opts.json().options).toMatchObject({ challenge: 'reg-chal' });
+    const state = opts.json().state as string;
+
+    const badState = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/register/verify',
+      headers: { cookie },
+      payload: { state: 'deadbeef', response: {} },
+    });
+    expect(badState.statusCode).toBe(400);
+    expect(badState.json()).toEqual({ error: 'Expired or unknown ceremony' });
+
+    const badAtt = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/register/verify',
+      headers: { cookie },
+      payload: { state, response: { bad: true } },
+    });
+    // State is single-use: a fresh ceremony is needed after the consume.
+    expect(badAtt.statusCode).toBe(400);
+
+    const opts2 = await app.inject({ method: 'POST', url: '/api/auth/passkey/register/options', headers: { cookie } });
+    const badAtt2 = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/register/verify',
+      headers: { cookie },
+      payload: { state: opts2.json().state, response: { bad: true }, name: 'key' },
+    });
+    expect(badAtt2.statusCode).toBe(400);
+    expect(badAtt2.json()).toEqual({ error: 'bad attestation' });
+
+    const opts3 = await app.inject({ method: 'POST', url: '/api/auth/passkey/register/options', headers: { cookie } });
+    const done = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/register/verify',
+      headers: { cookie },
+      payload: { state: opts3.json().state, response: { id: 'cred-1' }, name: 'my key' },
+    });
+    expect(done.json()).toEqual({ ok: true, id: 'cred-1' });
+
+    const list = await app.inject({ method: 'GET', url: '/api/auth/passkeys', headers: { cookie } });
+    expect(list.json().passkeys).toMatchObject([{ id: 'cred-1', name: 'my key' }]);
+    expect(typeof list.json().passkeys[0].created).toBe('number');
+    expect(JSON.stringify(list.json())).not.toContain('cGsx');
+
+    const gone = await app.inject({ method: 'DELETE', url: '/api/auth/passkeys/nope', headers: { cookie } });
+    expect(gone.statusCode).toBe(404);
+    expect((await app.inject({ method: 'DELETE', url: '/api/auth/passkeys/cred-1', headers: { cookie } })).json()).toEqual({ ok: true });
+    expect((await app.inject({ method: 'GET', url: '/api/auth/passkeys', headers: { cookie } })).json()).toEqual({ passkeys: [] });
+  });
+
+  it('logs in with passkeys publicly and guards failures', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir, passkeyOps: fakePasskeys() });
+
+    const empty = await app.inject({ method: 'POST', url: '/api/auth/passkey/login/options' });
+    expect(empty.statusCode).toBe(400);
+    expect(empty.json()).toEqual({ error: 'No passkeys registered' });
+
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'tester', password: KNOWN_PASSWORD } });
+    const cookie = sessionCookie(login);
+    const reg = await app.inject({ method: 'POST', url: '/api/auth/passkey/register/options', headers: { cookie } });
+    await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/register/verify',
+      headers: { cookie },
+      payload: { state: reg.json().state, response: { id: 'cred-1' } },
+    });
+
+    // Login ceremony is PUBLIC (no cookie needed).
+    const opts = await app.inject({ method: 'POST', url: '/api/auth/passkey/login/options' });
+    expect(opts.statusCode).toBe(200);
+    expect(opts.json().options).toMatchObject({ challenge: 'auth-chal' });
+
+    const badState = await app.inject({ method: 'POST', url: '/api/auth/passkey/login/verify', payload: { state: 'nope', response: {} } });
+    expect(badState.statusCode).toBe(400);
+
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/login/verify',
+      payload: { state: opts.json().state, response: { id: 'ghost' } },
+    });
+    expect(unknown.statusCode).toBe(401);
+
+    const opts2 = await app.inject({ method: 'POST', url: '/api/auth/passkey/login/options' });
+    const failed = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/login/verify',
+      payload: { state: opts2.json().state, response: { id: 'cred-1', bad: true } },
+    });
+    expect(failed.statusCode).toBe(401);
+    expect(failed.json()).toEqual({ error: 'Passkey verification failed' });
+
+    const opts3 = await app.inject({ method: 'POST', url: '/api/auth/passkey/login/options' });
+    const done = await app.inject({
+      method: 'POST',
+      url: '/api/auth/passkey/login/verify',
+      payload: { state: opts3.json().state, response: { id: 'cred-1' } },
+    });
+    expect(done.json()).toEqual({ ok: true });
+    expect(String(done.headers['set-cookie'])).toContain('Max-Age=86400');
+    const session = sessionCookie(done);
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie: session } })).statusCode).toBe(200);
+  });
+
+  it('expires single-use ceremony states', async () => {
+    const { ChallengeMap } = await import('../src/passkey.js');
+    const map = new ChallengeMap();
+    expect(map.take('missing', 1000)).toBeNull();
+    expect(map.take(42, 1000)).toBeNull();
+    const state = map.issue('chal', 1000);
+    expect(map.take(state, 1000)).toBe('chal');
+    expect(map.take(state, 1000)).toBeNull();
+    const old = map.issue('old', 1000);
+    expect(map.take(old, 1000 + 5 * 60 * 1000 + 1)).toBeNull();
+  });
+
+  it('grants loopback local login and denies the rest', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir, passkeyOps: fakePasskeys() });
+
+    const local = await app.inject({ method: 'POST', url: '/api/login/local' });
+    expect(local.json()).toEqual({ ok: true });
+    const cookie = sessionCookie(local);
+    expect(cookie).toMatch(/^tpsid=[0-9a-f]{64}$/);
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(200);
+    const rows = (
+      await app.inject({ method: 'GET', url: '/api/auth/sessions', headers: { cookie } })
+    ).json().sessions as Array<{ browser: string; current: boolean }>;
+    expect(rows.find((r) => r.current)?.browser).toBe('Local login');
+
+    const lan = await app.inject({ method: 'POST', url: '/api/login/local', remoteAddress: '192.168.1.50' });
+    expect(lan.statusCode).toBe(403);
+    expect(lan.json()).toEqual({ error: 'Local login is only available from this machine (loopback)' });
+
+    // Forged proxy headers change nothing (req.ip is the direct peer).
+    const forged = await app.inject({
+      method: 'POST',
+      url: '/api/login/local',
+      remoteAddress: '192.168.1.50',
+      headers: { 'x-forwarded-for': '127.0.0.1' },
+    });
+    expect(forged.statusCode).toBe(403);
+
+    const v6 = await app.inject({ method: 'POST', url: '/api/login/local', remoteAddress: '::1' });
+    expect(v6.json()).toEqual({ ok: true });
   });
 });

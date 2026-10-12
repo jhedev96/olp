@@ -8,6 +8,7 @@ import type { Environment, PkgManId } from '@olp/env-core';
 import type { SysDeps } from '@olp/sysinfo';
 import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
+import type { PasskeyOps } from './passkey.js';
 import { nodeDeps, registerStatsRoutes } from './stats.js';
 import { registerMonitorRoutes } from './monitor.js';
 import type { KillDeps } from '@olp/sysinfo';
@@ -84,9 +85,10 @@ export interface ServerOptions {
   settingsBotUsername?: () => Promise<string | null>;
   watchdogProbe?: WatchdogProbe;
   /** Kill deps override for monitor tests (production wires `process.*`). */
-  monitorKill?: KillDeps;
-  /** Controller factory override for services tests. */
+  monitorKill?: KillDeps;  /** Controller factory override for services tests. */
   servicesControllerOf?: ServicesControllerOf;
+  /** Passkey ceremony override for auth tests (production uses the real lib). */
+  passkeyOps?: PasskeyOps;
   /** Web `dist` dir override; `null` forces API-only mode (tests). */
   webDir?: string | null;
 }
@@ -114,7 +116,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     version: SERVER_VERSION,
   }));
 
-  const auth = createAuthContext(dataDir, legacyDir);
+  const auth = createAuthContext(dataDir, legacyDir, { passkeyOps: opts.passkeyOps });
   migrateLegacy(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });

@@ -16,6 +16,41 @@ export interface AuthConfig {
   username: string;
   salt: string;
   hash: string;
+  /** Registered passkeys (public-key material only; absent on old files → `[]`). */
+  passkeys: PasskeyCredential[];
+}
+
+/** One registered WebAuthn credential (no secrets — id + public key + counter). */
+export interface PasskeyCredential {
+  /** Credential id (base64url, client-opaque). */
+  id: string;
+  /** COSE public key (base64url). */
+  publicKey: string;
+  /** Signature counter (clone detection via the lib). */
+  counter: number;
+  /** Human label from registration. */
+  name: string;
+  created: number;
+}
+
+/** Tolerant passkey list parse (garbage rows drop, absent → `[]`). */
+function normalizePasskeys(raw: unknown): PasskeyCredential[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PasskeyCredential[] = [];
+  for (const row of raw) {
+    if (typeof row !== 'object' || row === null) continue;
+    const r = row as Record<string, unknown>;
+    if (typeof r['id'] !== 'string' || r['id'] === '') continue;
+    if (typeof r['publicKey'] !== 'string' || r['publicKey'] === '') continue;
+    out.push({
+      id: r['id'],
+      publicKey: r['publicKey'],
+      counter: typeof r['counter'] === 'number' ? r['counter'] : 0,
+      name: typeof r['name'] === 'string' ? r['name'] : '',
+      created: typeof r['created'] === 'number' ? r['created'] : 0,
+    });
+  }
+  return out;
 }
 
 /** Injectable filesystem surface (tests use fakes; production uses `node:fs`). */
@@ -68,7 +103,7 @@ function normalize(raw: unknown): AuthConfig {
   if (typeof salt !== 'string' || salt === '' || typeof hash !== 'string' || hash === '') {
     throw new Error('Invalid auth config (missing salt/hash)');
   }
-  return { username, salt, hash };
+  return { username, salt, hash, passkeys: normalizePasskeys(obj['passkeys']) };
 }
 
 /**
@@ -94,7 +129,7 @@ export function loadConfig(
   const username = generateUsername();
   const password = generatePassword();
   const salt = generateSalt();
-  const config: AuthConfig = { username, salt, hash: hashPassword(password, salt) };
+  const config: AuthConfig = { username, salt, hash: hashPassword(password, salt), passkeys: [] };
   io.writeFile(file, JSON.stringify(config, null, 2));
   return { config, created: true, migrated: false, plaintextPassword: password };
 }
@@ -147,6 +182,7 @@ export function changePassword(
   if (invalid !== null) return { error: invalid };
   const salt = generateSalt();
   return {
-    config: { username: config.username, salt, hash: hashPassword(next as string, salt) },
+    // Spread preserves passkeys (a password change must never wipe keys).
+    config: { ...config, salt, hash: hashPassword(next as string, salt) },
   };
 }

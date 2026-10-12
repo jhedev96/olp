@@ -189,10 +189,11 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 22 — Passkey + local login wave 12 (WebAuthn + loopback; spec + ADR-007 approved 2026-10-12)
 
-- [~] W12-00 planning: spec + ADR-007 + tasks + todos (`SPECS/spec-passkey-wave.md`, `docs/adr-007-webauthn-passkey.md`, `TASKS/phase-22-passkey-wave.md`)
-- [ ] W12-01 auth config passkey storage + tests
-- [ ] W12-02 dep + adapter + passkey endpoints + tests
-- [ ] W12-03 loopback local login + tests
-- [ ] W12-04 smoke extension + live ALL GREEN (+ authenticator human gate)
-- [ ] W12-05 frontend wiring
-- [ ] W12-06 docs + CAND-032 close
+- [x] W12-00 planning: spec + ADR-007 + tasks + todos (`SPECS/spec-passkey-wave.md`, `docs/adr-007-webauthn-passkey.md`, `TASKS/phase-22-passkey-wave.md`)
+- [x] W12-01 auth config passkey storage + tests
+- [x] W12-02 dep + adapter + passkey endpoints + tests
+- [x] W12-03 loopback local login + tests
+- [x] W12-04 smoke extension + live ALL GREEN (+ authenticator human gate)
+- [x] W12-05 frontend wiring
+- [x] W12-06 docs + CAND-032 close
+- [ ] HUMAN GATE: real-authenticator ceremony proof (register + login with a security key / platform biometric on a human machine; record PASS/FAIL here)

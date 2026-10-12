@@ -15,7 +15,7 @@ export {
   validUsername,
   validateNewPassword,
 } from './password.js';
-export type { AuthConfig, ConfigIo, LoadResult } from './config.js';
+export type { AuthConfig, ConfigIo, LoadResult, PasskeyCredential } from './config.js';
 export {
   loadConfig,
   saveConfig,

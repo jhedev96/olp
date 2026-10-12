@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { LoginPage } from '../src/pages/login.js';
 
 afterEach(() => {
@@ -34,7 +34,7 @@ describe('web login page (React)', () => {
     expect(screen.getByText('Salted PBKDF2 120k')).not.toBeNull();
   });
 
-  it('clears fields and parks unfinished auth methods as disabled', async () => {
+  it('clears fields and parks passkey without browser support', async () => {
     await act(async () => {
       render(<LoginPage />);
     });
@@ -44,7 +44,7 @@ describe('web login page (React)', () => {
     });
     expect((screen.getByPlaceholderText('Username') as HTMLInputElement).value).toBe('');
     expect(screen.getByRole('button', { name: 'Hardware passkey' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Local pipe auth' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Local pipe auth' })).toHaveProperty('disabled', false);
   });
 
   it('navigates on success', async () => {
@@ -78,6 +78,66 @@ describe('web login page (React)', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
     });
     expect(bodies.some((b) => (b as { remember?: unknown }).remember === true)).toBe(true);
+  });
+
+  it('disables passkey without browser support', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(jsonResponse(401, { error: 'x' })));
+    await act(async () => {
+      render(<LoginPage />);
+    });
+    const button = screen.getByRole('button', { name: 'Hardware passkey' });
+    expect(button).toHaveProperty('disabled', true);
+    expect(button.getAttribute('title')).toBe('Passkeys are not supported in this browser');
+  });
+
+  it('signs in with a passkey when supported', async () => {
+    const calls: string[] = [];
+    Object.defineProperty(window, 'PublicKeyCredential', { value: class {}, configurable: true });
+    Object.defineProperty(window.navigator, 'credentials', {
+      value: { get: () => Promise.resolve({ id: 'cred-1', fake: true }) },
+      configurable: true,
+    });
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (typeof init?.body === 'string') bodies.push(JSON.parse(init.body));
+      if (url === '/api/auth/passkey/login/options') return Promise.resolve(jsonResponse(200, { options: { challenge: 'c' }, state: 's1' }));
+      return Promise.resolve(jsonResponse(200, { ok: true }));
+    });
+    try {
+      const seen: string[] = [];
+      await act(async () => {
+        render(<LoginPage goto={(url) => seen.push(url)} />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Hardware passkey' }));
+      });
+      expect(seen).toEqual(['/dashboard']);
+      expect(bodies.some((b) => (b as { state?: unknown }).state === 's1')).toBe(true);
+    } finally {
+      const nav = window.navigator as unknown as Record<string, unknown>;
+      delete nav['credentials'];
+      delete (window as unknown as Record<string, unknown>)['PublicKeyCredential'];
+    }
+  });
+
+  it('confirms local login with the localhost warning', async () => {
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      Promise.resolve(jsonResponse(200, url === '/api/login/local' && (init?.method ?? 'GET') === 'POST' ? { ok: true } : {})),
+    );
+    const seen: string[] = [];
+    await act(async () => {
+      render(<LoginPage goto={(url) => seen.push(url)} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Local pipe auth' }));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('loopback');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Sign in locally' }));
+    });
+    expect(seen).toEqual(['/dashboard']);
   });
 
   it('shows the server message on bad credentials without navigating', async () => {
