@@ -49,6 +49,14 @@ function dashboardHandler(url: string): unknown {
   if (url === '/api/stats') return STATS;
   if (url === '/api/install') return STORE;
   if (url === '/api/settings') return { telegram: { enabled: true } };
+  if (url === '/api/services') {
+    return {
+      services: [
+        { id: 'mariadb', name: 'MariaDB', port: 3306, active: true },
+        { id: 'postgres', name: 'PostgreSQL', port: 5432, active: false },
+      ],
+    };
+  }
   return SITES;
 }
 
@@ -124,9 +132,30 @@ describe('web dashboard page', () => {
     });
     expect(screen.getByText('2 available')).not.toBeNull();
     expect(screen.getByText('Installed')).not.toBeNull();
-    expect(screen.getByText('CAND-005')).not.toBeNull();
     expect(screen.getByText('CAND-013')).not.toBeNull();
+    expect(screen.queryByText('CAND-005')).toBeNull();
     expect(screen.getByRole('button', { name: 'Restart panel' })).toHaveProperty('disabled', true);
+  });
+
+  it('starts stopped daemons and surfaces errors', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      const body = url === '/api/services/postgres/start'
+        ? { error: 'Failed to start postgresql: unit not found' }
+        : dashboardHandler(url);
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText('MariaDB')).not.toBeNull();
+    expect(screen.getByText('Active')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Start'));
+    });
+    expect(calls).toContain('POST /api/services/postgres/start');
+    expect(screen.getByText('Failed to start postgresql: unit not found')).not.toBeNull();
   });
 
   it('filters sites, links proxies and shows telegram state', async () => {
