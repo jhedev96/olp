@@ -35,12 +35,13 @@
 | CAND-026 | ~~Schema DDL view + table sizes/row counts + data-vs-index panel~~ | Shipped wave 4: schema + ddl endpoints + page wiring (CLOSED 2026-10-12) | Approximate rows footnoted; pg DDL honestly column-shaped |
 | CAND-027 | Store extras (pkg update, batch upgrade, installed versions, conf path + Configure, mirror/latency) | NEW: package-management endpoints (update/upgrade/version probe) | From P0e store read; versions need per-bin `--version` mapping |
 | CAND-028 | ~~Cron extras (dry-run-all, next-run countdown, dispatch stats/latency, battery card, daemon PID)~~ | Shipped wave 5: dry-run, run-now + history, countdown, stats, battery, daemon PID (CLOSED 2026-10-12) | Stats cover panel-triggered runs only (footnoted); no auto-runner, no log scraping |
-| CAND-029 | Backup advanced (scheduled snapshots, upload import, SHA256 verify, full-system bundle, gzip variant) | NEW: scheduler integration + upload/restore + hash endpoints | From P0e backup read |
+| CAND-029 | ~~Backup advanced (scheduled snapshots, upload import, SHA256 verify, full-system bundle, gzip variant)~~ | Shipped wave 6 core: verify, gzip, upload, schedules (CLOSED 2026-10-12) | Full-system splits to CAND-035; auto-prune needs retention design |
 | CAND-030 | Active device sessions table + per-session revoke | NEW: session metadata tracking (UA/IP/last-seen) + revoke endpoint | From P0e settings read; privacy design (what to store) required |
 | CAND-031 | Server config management (bind controls, telegram verified badge, remember-me 30d, rehash flag) + PBKDF2 display decision | MIXED: verified-badge needs getMe proxy (small NEW); bind controls need restart-capable config (design); remember-me needs TTL option; rehash flag + 310k text need HUMAN DROP DECISION (no cryptographic effect, contradicts 120k truth) | From P0e settings+login read; user decision pending on the drop |
 | CAND-032 | Alternative auth methods (hardware passkey, biometric, local pipe) | NEW: full auth-method wave (WebAuthn ceremony or pipe handshake + UI) | From P3 login build; buttons ship disabled with this id |
 | CAND-033 | Editor prettify + diff view | NEW: formatter dependency (prettier/--check?) + diff rendering vs opened snapshot | From P4 files audit; Discard already real (snapshot kept per tab) |
 | CAND-034 | Terminal snippet/macro runners (desktop macros row + mobile one-touch runners) | NEW: stored snippet list + one-tap send (all client-side; needs UX + storage design) | From P4 terminal audit (both desktop and mobile mockups) |
+| CAND-035 | Backup full-system bundle (databases + crons + configs) | NEW: cross-domain orchestration (needs a job-runner design, not a backup-local call) | Split from CAND-029 in wave 6 (mockup Full System Snapshot card) |
 
 Rules: add rows only from inventory verdicts (no drive-by ideas without
 a mockup source); when scheduling, write the full spec first (rules §1).
