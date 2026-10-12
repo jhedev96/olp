@@ -98,3 +98,12 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W1-03 smoke extension + live PASS/FAIL
 - [x] W1-04 frontend monitor wiring
 - [x] W1-05 docs + CAND-001/002/003/014 close-out (CAND-004 kill deferred by decision)
+
+## Phase 12 — Kill wave 2 (privileged kill, spec approved 2026-10-12)
+
+- [~] W2-00 planning: spec + tasks + todos (`SPECS/spec-kill-wave.md`, `TASKS/phase-12-kill-wave.md`)
+- [ ] W2-01 sysinfo kill helper + verdict tests
+- [ ] W2-02 server kill route + inject tests
+- [ ] W2-03 smoke extension + live ALL GREEN
+- [ ] W2-04 frontend per-row Kill wiring
+- [ ] W2-05 docs + CAND-004 close-out
