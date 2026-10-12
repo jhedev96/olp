@@ -41,6 +41,11 @@ function sessionsHandler(url: string): { status: number; json: unknown } {
   if (url === '/api/settings') return { status: 200, json: SETTINGS_BIND };
   if (url === '/api/auth/sessions') return { status: 200, json: SESSIONS };
   if (url === '/api/settings/telegram/identity') return { status: 200, json: { username: 'TerwoNodeBot' } };
+  if (url === '/api/auth/passkeys') {
+    return { status: 200, json: { passkeys: [{ id: 'cred-1', name: 'YubiKey 5', created: 1000 }] } };
+  }
+  if (url === '/api/auth/passkey/register/options') return { status: 200, json: { options: { challenge: 'c' }, state: 's9' } };
+  if (url === '/api/auth/passkey/register/verify') return { status: 200, json: { ok: true, id: 'cred-2' } };
   return { status: 200, json: { ok: true } };
 }
 
@@ -220,6 +225,50 @@ describe('web settings page', () => {
     expect(screen.getByText('Unverified')).not.toBeNull();
     expect(screen.getByText('LAN exposed — do not put on the internet')).not.toBeNull();
     expect(screen.getByText('No active sessions.')).not.toBeNull();
+  });
+
+  it('lists passkeys and registers a new one', async () => {
+    const { calls } = stubApi((url, method) => sessionsHandler(url));
+    Object.defineProperty(window.navigator, 'credentials', {
+      value: { create: () => Promise.resolve({ id: 'cred-2', fake: true }) },
+      configurable: true,
+    });
+    try {
+      await act(async () => {
+        render(<SettingsPage />);
+      });
+      expect(screen.getByText('Passkeys')).not.toBeNull();
+      expect(screen.getByText('1 registered')).not.toBeNull();
+      expect(screen.getByText('YubiKey 5')).not.toBeNull();
+      fireEvent.change(screen.getByLabelText('New passkey name'), { target: { value: 'Pixel 8' } });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Register passkey'));
+      });
+      const verify = calls.find((c) => c.url === '/api/auth/passkey/register/verify');
+      expect(verify?.method).toBe('POST');
+      expect(verify?.body).toMatchObject({ state: 's9', name: 'Pixel 8' });
+    } finally {
+      delete (window.navigator as unknown as Record<string, unknown>)['credentials'];
+    }
+  });
+
+  it('deletes passkeys through the dialog', async () => {
+    const { calls } = stubApi((url, method) => {
+      if (url === '/api/auth/passkeys' && method === 'DELETE') return { status: 200, json: { ok: true } };
+      return sessionsHandler(url);
+    });
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Delete'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('YubiKey 5');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    });
+    expect(calls.some((c) => c.url === '/api/auth/passkeys/cred-1' && c.method === 'DELETE')).toBe(true);
   });
 
   it('revokes a session through the dialog and reloads', async () => {

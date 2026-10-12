@@ -6,6 +6,7 @@ import { fmtSize } from '../lib/format.js';
 import { getTheme, setTheme } from '../lib/theme.js';
 import { APP_VERSION } from '../lib/version.js';
 import { BrandBlock } from '../components/shell/BrandBlock.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card, CardContent, CardTitle } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -60,6 +61,10 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
   const [theme, setThemeState] = useState(getTheme);
   const [stats, setStats] = useState<MarketingStats | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirmLocal, setConfirmLocal] = useState(false);
+  const passkeySupported =
+    typeof window !== 'undefined' &&
+    typeof (window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential !== 'undefined';
 
   useEffect(() => {
     createIcons({ icons: { Moon, Sun, X } });
@@ -88,8 +93,7 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
     setThemeState(next);
   };
 
-  const copyFirstBoot = async (): Promise<void> => {
-    try {
+  const copyFirstBoot = async (): Promise<void> => {    try {
       await navigator.clipboard.writeText(FIRST_BOOT_CMD);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
@@ -113,6 +117,65 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
         },
         { unauthorized: 'rethrow' },
       );
+      if (body.ok === true) go('/dashboard');
+      else setError('Login failed');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Minimal `navigator.credentials` surface (passkey ceremony only). */
+  const webAuthn = (): { create(options: unknown): Promise<unknown>; get(options: unknown): Promise<unknown> } | null => {
+    if (!passkeySupported) return null;
+    const creds = (window.navigator as unknown as { credentials?: { create(o: unknown): Promise<unknown>; get(o: unknown): Promise<unknown> } }).credentials;
+    return creds ?? null;
+  };
+
+  const passkeyLogin = async (): Promise<void> => {
+    const creds = webAuthn();
+    if (creds === null) {
+      setError('Passkeys are not supported in this browser');
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const opts = await apiJson<{ options?: unknown; state?: unknown }>(
+        '/api/auth/passkey/login/options',
+        { method: 'POST' },
+        { unauthorized: 'rethrow' },
+      );
+      if (typeof opts.state !== 'string') throw new Error('Bad ceremony state');
+      const assertion = await creds.get({ publicKey: opts.options });
+      const body = await apiJson<{ ok?: unknown }>(
+        '/api/auth/passkey/login/verify',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: opts.state, response: assertion }),
+        },
+        { unauthorized: 'rethrow' },
+      );
+      if (body.ok === true) go('/dashboard');
+      else setError('Login failed');
+    } catch (err) {
+      // Browser cancellations surface verbatim (honest, actionable).
+      setError(err instanceof ApiError || err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmLocalAction = async (): Promise<void> => {
+    setConfirmLocal(false);
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const body = await apiJson<{ ok?: unknown }>('/api/login/local', { method: 'POST' }, { unauthorized: 'rethrow' });
       if (body.ok === true) go('/dashboard');
       else setError('Login failed');
     } catch (err) {
@@ -230,10 +293,17 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
                 </p>
               )}
               <div className="mt-3 flex gap-2">
-                <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-032)" className="flex-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  disabled={!passkeySupported || busy}
+                  title={passkeySupported ? 'Sign in with a security key or device biometric' : 'Passkeys are not supported in this browser'}
+                  onClick={() => void passkeyLogin()}
+                >
                   Hardware passkey
                 </Button>
-                <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-032)" className="flex-1">
+                <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => setConfirmLocal(true)}>
                   Local pipe auth
                 </Button>
               </div>
@@ -241,6 +311,15 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
           </Card>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmLocal}
+        title="Local pipe auth"
+        message="Sign in as the local machine owner without a password? This works only from this machine (loopback) — any other localhost app could use it too. Never expose the panel to share this trust."
+        confirmLabel="Sign in locally"
+        destructive={true}
+        onConfirm={() => void confirmLocalAction()}
+        onCancel={() => setConfirmLocal(false)}
+      />
     </div>
   );
 }
