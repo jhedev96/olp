@@ -12,7 +12,8 @@
 | CAND-003 | ~~Monitor: per-core GHz + frequency wave~~ | Shipped wave 1: `summary.cpu.perCore[]` + page bars (CLOSED 2026-10-12) | 3-cluster grouping stays a frontend heuristic |
 | CAND-004 | ~~Monitor: kill runaway process~~ | Shipped wave 2: per-row Kill + `POST .../:pid/kill` under deny-by-default authz (CLOSED 2026-10-12) | Security-read the diff; TOCTOU accepted residual, TERM-first + dialog names pid+command |
 | CAND-005 | ~~Dashboard: Services & Daemons section~~ | Shipped wave 3: presence status + best-effort START (CLOSED 2026-10-12) | STOP buttons, per-distro unit tables, auto-start stay out |
-| CAND-006 | Database: Create New Database button | NEW: `POST /api/db/:engine/databases` (CREATE DATABASE) | Small; needs privilege + validation design |
+| CAND-006 | ~~Database: Create New Database button~~ | Shipped wave 4: validated create + fresh list (CLOSED 2026-10-12) | 409 exists / 403 privilege / 500 other |
+| CAND-024 | Redis engine + browser | NEW: full Redis driver (INFO/KEYS/GET) + UI engine tab | From P0d database read (engine card exists in mockup) |
 | CAND-007 | ~~Backup extras beyond CRUD~~ | SUPERSEDED by P0e row detail + CAND-029 (closed 2026-10-10) | Catch-all emptied, do not reopen |
 | CAND-008 | ~~Unresolved P0 leftovers~~ | SUPERSEDED — P0 closed 2026-10-10 with zero TBD rows | Catch-all emptied, do not reopen |
 | CAND-009 | Lucide icon pass (replace emoji) | none (frontend-only) | Opportunistic per page; files page partially done |
@@ -30,9 +31,8 @@
 | CAND-021 | Nginx vhost advanced (SSL states, per-vhost toggles, conf edit, master stats) | NEW: nginx conf parse/manage endpoints | From P0d proxy read; CRUD stays real, this is the advanced layer |
 | CAND-022 | Port availability indicator in deploy modal | NEW: tiny port-probe endpoint (or attempt-bind) | From P0d add-modal read |
 | CAND-023 | Custom startup command per site | NEW: command field + runner (breaks fixed per-type runners) | From P0d add-modal read; design carefully (jail implications) |
-| CAND-024 | Redis engine + browser | NEW: full Redis driver (INFO/KEYS/GET) + UI engine tab | From P0d database read (engine card exists in mockup) |
 | CAND-025 | SQL import/export file transfer | NEW: dump/restore-via-upload endpoints (or backup-module reuse) | From P0d database read (Import/Export buttons) |
-| CAND-026 | Schema DDL view + table sizes/row counts + data-vs-index panel | NEW: information_schema endpoints (or composed ad-hoc SQL — decide in wave) | From P0d database read |
+| CAND-026 | ~~Schema DDL view + table sizes/row counts + data-vs-index panel~~ | Shipped wave 4: schema + ddl endpoints + page wiring (CLOSED 2026-10-12) | Approximate rows footnoted; pg DDL honestly column-shaped |
 | CAND-027 | Store extras (pkg update, batch upgrade, installed versions, conf path + Configure, mirror/latency) | NEW: package-management endpoints (update/upgrade/version probe) | From P0e store read; versions need per-bin `--version` mapping |
 | CAND-028 | Cron extras (dry-run-all, next-run countdown, dispatch stats/latency, battery card, daemon PID) | NEW: execution-history tracking + schedule math + daemon introspection | From P0e cron read; stats need run-result persistence |
 | CAND-029 | Backup advanced (scheduled snapshots, upload import, SHA256 verify, full-system bundle, gzip variant) | NEW: scheduler integration + upload/restore + hash endpoints | From P0e backup read |
