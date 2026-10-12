@@ -7,6 +7,7 @@ import type { TermLike, TermSocket } from '../src/pages/terminal.js';
 afterEach(() => {
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
+  localStorage.clear();
 });
 
 class FakeTerm implements TermLike {
@@ -219,5 +220,64 @@ describe('web terminal page', () => {
     });
     expect(sockets[1]?.sent).toContain(JSON.stringify({ t: 'in', d: 'ls -la\n' }));
     expect((screen.getByLabelText('Send raw command') as HTMLInputElement).value).toBe('');
+  });
+
+  it('sends safe presets one-tap', () => {
+    const { sockets } = mounted();
+    act(() => {
+      sockets[0]?.open();
+    });
+    act(() => {
+      fireEvent.click(screen.getByTitle('htop'));
+    });
+    expect(sockets[0]?.sent).toContain(JSON.stringify({ t: 'in', d: 'htop\n' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('confirms destructive snippets before sending', () => {
+    const { sockets } = mounted();
+    act(() => {
+      sockets[0]?.open();
+    });
+    fireEvent.change(screen.getByLabelText('New snippet'), { target: { value: 'killall node' } });
+    act(() => {
+      fireEvent.click(screen.getByText('Add'));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTitle('killall node'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('killall node');
+    expect(sockets[0]?.sent.some((m) => m.includes('killall'))).toBe(false);
+    act(() => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+    });
+    expect(sockets[0]?.sent).toContain(JSON.stringify({ t: 'in', d: 'killall node\n' }));
+  });
+
+  it('adds, persists, and removes custom snippets', () => {
+    const first = mounted();
+    act(() => {
+      first.sockets[0]?.open();
+    });
+    fireEvent.change(screen.getByLabelText('New snippet'), { target: { value: 'git log --oneline' } });
+    act(() => {
+      fireEvent.click(screen.getByText('Add'));
+    });
+    expect(screen.getByTitle('git log --oneline')).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem('olp.snippets.v1') ?? 'null')).toEqual(['git log --oneline']);
+    fireEvent.change(screen.getByLabelText('New snippet'), { target: { value: 'git log --oneline' } });
+    act(() => {
+      fireEvent.click(screen.getByText('Add'));
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Snippet already exists');
+    document.body.innerHTML = '';
+    mounted();
+    expect(screen.getByTitle('git log --oneline')).not.toBeNull();
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Remove git log --oneline'));
+    });
+    expect(screen.queryByTitle('git log --oneline')).toBeNull();
+    expect(localStorage.getItem('olp.snippets.v1')).toBe('[]');
   });
 });

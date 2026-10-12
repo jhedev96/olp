@@ -4,6 +4,7 @@ import { Terminal } from 'xterm';
 import type { IDisposable } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { wsUrl } from '../lib/api.js';
+import { DEFAULT_SNIPPETS, MAX_CUSTOM, isDestructive, loadSnippets, saveSnippets } from '../lib/snippets.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
@@ -72,9 +73,11 @@ function defaultTerminal(): { term: TermLike; fit: { fit(): void } } {
  * Terminal page (mockup terminal parity): xterm + fit addon, WS `/term`
  * with `{t:'in'|'rs'|'new'}` protocol, pty/pipe badge, font-size
  * controls, connect/new/clear/paste buttons, right-click paste, mobile
- * keymap with sticky ctrl/alt. Session tabs, split panes, per-tab TTY
- * (CAND-017), WS latency (CAND-018), bell/cursor/theme controls, macro
- * snippet runners (CAND-034), and the kernel line of the MOTD (CAND-014)
+ * keymap with sticky ctrl/alt, macros row (preset + custom one-tap
+ * snippet runners with destructive confirm, localStorage only).
+ * Session tabs, split panes, per-tab TTY
+ * (CAND-017), WS latency (CAND-018), bell/cursor/theme controls,
+ * and the kernel line of the MOTD (CAND-014)
  * stay out; the MOTD art itself arrives via the server greeting.
  */
 export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
@@ -95,6 +98,14 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
   const [confirmNew, setConfirmNew] = useState(false);
   const [fontSize, setFontSize] = useState(14);
   const [execCmd, setExecCmd] = useState('');
+  const [customs, setCustoms] = useState<string[]>([]);
+  const [newSnippet, setNewSnippet] = useState('');
+  const [snippetError, setSnippetError] = useState('');
+  const [pendingSnippet, setPendingSnippet] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCustoms(loadSnippets());
+  }, []);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -256,6 +267,47 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
     sendKey(`${cmd}\n`);
   };
 
+  const tapSnippet = (cmd: string): void => {
+    // Destructive taps ask first (UX guard, not a boundary — the raw
+    // exec form above stays unguarded by design).
+    if (isDestructive(cmd)) {
+      setPendingSnippet(cmd);
+      return;
+    }
+    sendKey(`${cmd}\n`);
+  };
+
+  const confirmSnippet = (): void => {
+    if (pendingSnippet === null) return;
+    const cmd = pendingSnippet;
+    setPendingSnippet(null);
+    sendKey(`${cmd}\n`);
+  };
+
+  const addSnippet = (): void => {
+    const cmd = newSnippet.trim();
+    if (cmd === '') return;
+    if ([...DEFAULT_SNIPPETS, ...customs].includes(cmd)) {
+      setSnippetError('Snippet already exists');
+      return;
+    }
+    if (customs.length >= MAX_CUSTOM) {
+      setSnippetError(`Maximum ${MAX_CUSTOM} custom snippets`);
+      return;
+    }
+    const next = [...customs, cmd];
+    setCustoms(next);
+    saveSnippets(next);
+    setNewSnippet('');
+    setSnippetError('');
+  };
+
+  const removeSnippet = (cmd: string): void => {
+    const next = customs.filter((c) => c !== cmd);
+    setCustoms(next);
+    saveSnippets(next);
+  };
+
   const paste = async (): Promise<void> => {
     try {
       const text = await navigator.clipboard.readText();
@@ -332,6 +384,46 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
           Exec
         </Button>
       </form>
+      <div>
+        <p className="mb-1 text-xs text-neutral-500">
+          Macros — one-tap runners (stored in this browser only)
+        </p>
+        <div className="flex flex-wrap items-center gap-1">
+          {DEFAULT_SNIPPETS.map((cmd) => (
+            <Button key={cmd} size="sm" variant="outline" title={cmd} onClick={() => tapSnippet(cmd)}>
+              {cmd}
+            </Button>
+          ))}
+          {customs.map((cmd) => (
+            <span key={cmd} className="inline-flex items-center gap-1 rounded-md border border-emerald-900 bg-emerald-950 px-2 py-1 text-xs text-emerald-200">
+              <button type="button" title={cmd} className="font-mono hover:underline" onClick={() => tapSnippet(cmd)}>
+                {cmd}
+              </button>
+              <button type="button" aria-label={`Remove ${cmd}`} className="text-emerald-400 hover:text-red-400" onClick={() => removeSnippet(cmd)}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-1 flex gap-2">
+          <Input
+            placeholder="New snippet, e.g. killall node"
+            aria-label="New snippet"
+            value={newSnippet}
+            onChange={(ev) => setNewSnippet(ev.target.value)}
+            maxLength={500}
+            className="w-64 font-mono"
+          />
+          <Button size="sm" variant="outline" onClick={addSnippet}>
+            Add
+          </Button>
+        </div>
+        {snippetError !== '' && (
+          <p role="alert" className="mt-1 text-xs text-red-400">
+            {snippetError}
+          </p>
+        )}
+      </div>
       <ConfirmDialog
         open={confirmNew}
         title="New terminal session"
@@ -340,6 +432,15 @@ export function TerminalPage(deps: TerminalPageDeps = {}): ReactElement {
         destructive={true}
         onConfirm={confirmCreateNew}
         onCancel={() => setConfirmNew(false)}
+      />
+      <ConfirmDialog
+        open={pendingSnippet !== null}
+        title="Run destructive snippet"
+        message={pendingSnippet === null ? '' : `Send "${pendingSnippet}" to the shell? This can kill processes or restart services.`}
+        confirmLabel="Send"
+        destructive={true}
+        onConfirm={confirmSnippet}
+        onCancel={() => setPendingSnippet(null)}
       />
       {hint !== '' && (
         <p role="alert" className="text-sm text-yellow-400">

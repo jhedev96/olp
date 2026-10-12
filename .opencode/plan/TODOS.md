@@ -182,7 +182,7 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 21 — Terminal snippets wave 11 (client-side; spec approved 2026-10-12)
 
-- [~] W11-00 planning: spec + tasks + todos (`SPECS/spec-snippets-wave.md`, `TASKS/phase-21-snippets-wave.md`)
-- [ ] W11-01 snippets lib + unit matrix
-- [ ] W11-02 macros row + dialogs + page tests
-- [ ] W11-03 docs + CAND-034 close
+- [x] W11-00 planning: spec + tasks + todos (`SPECS/spec-snippets-wave.md`, `TASKS/phase-21-snippets-wave.md`)
+- [x] W11-01 snippets lib + unit matrix
+- [x] W11-02 macros row + dialogs + page tests
+- [x] W11-03 docs + CAND-034 close
