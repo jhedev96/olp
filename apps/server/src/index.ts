@@ -31,6 +31,8 @@ import type { ServicesControllerOf } from './services.js';
 import { realSpawnShell, registerStoreRoutes } from './store.js';
 import type { SpawnShell } from './store.js';
 import { fileSettingsStore, registerSettingsRoutes } from './settings.js';
+import { freshReport, resolveBind } from './settings.js';
+import type { BindReport } from './settings.js';
 import type { SettingsStore } from './settings.js';
 import { migrateLegacy } from './migrate.js';
 import { TelegramBot, nodeTelegramApi } from './telegram.js';
@@ -52,6 +54,8 @@ export interface ServerHandle {
   terminal: TerminalManager;
   telegram: { bot: TelegramBot; startPoller: () => void; stopPoller: () => void };
   watchdog: { checkOnce: () => Promise<void> };
+  /** Shared bind report (configured at build, effective after listen). */
+  bind: BindReport;
 }
 
 /** Injectable server inputs (tests pass fakes; production uses defaults). */
@@ -158,6 +162,10 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   });
   registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend(), runsPath: join(dataDir, 'cron-runs.json') });
   const settingsStore = opts.settingsStore ?? fileSettingsStore(auth.dataDir);
+  // Bind report holder (resolved here so boot and routes share one
+  // source of truth; listen mutates effective/fallback in W13-03).
+  const bindResolved = resolveBind(process.env, settingsStore.load().bind ?? null);
+  const bind = freshReport(bindResolved.bind, bindResolved.source);
   const telegramApi = opts.telegramApi ?? nodeTelegramApi();
   const botStatus = async (): Promise<BotStatus> => {
     const info = await getSystemInfo(env, sysDeps, root);
@@ -224,6 +232,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
       startPoller();
     },
     testSend: (tg) => telegramApi.sendMessage(tg.botToken, tg.chatId, 'OLP notification test successful!'),
+    bindReport: bind,
     botUsername: opts.settingsBotUsername ?? (async () => {
       const tg = settingsStore.load().telegram;
       if (!tg.enabled || tg.botToken === '') return null;
@@ -277,7 +286,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     reply.code(400);
     await reply.send({ error: err.message || 'Failed' });
   });
-  return { app, auth, env, terminal, telegram: { bot, startPoller, stopPoller }, watchdog };
+  return { app, auth, env, terminal, telegram: { bot, startPoller, stopPoller }, watchdog, bind };
 }
 
 /**

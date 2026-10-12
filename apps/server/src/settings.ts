@@ -150,6 +150,13 @@ export interface SettingsRouteOptions {
   testSend: (tg: TelegramSettings) => Promise<void>;
   /** Bot username for the verified badge (null = unverified; defaults to a stored-token getMe — tests inject). */
   botUsername?: () => Promise<string | null>;
+  /** Shared bind report (listen mutates effective/fallback — W13-03). */
+  bindReport: BindReport;
+}
+
+/** Fresh report (effective == configured until listen proves otherwise). */
+export function freshReport(configured: BindConfig, source: BindReport['source']): BindReport {
+  return { configured, source, effective: { ...configured }, fallback: false };
 }
 
 /** Bind address info (read-only; editing needs a restart-capable config — CAND-037). */
@@ -159,11 +166,16 @@ export interface BindInfo {
   loopback: boolean;
 }
 
+/** Loopback hosts (UI badge + fallback target). */
+export function isLoopbackBind(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
 /** Boot bind source of truth (same keys and defaults as `main()` listen). */
 export function currentBind(): BindInfo {
   const host = process.env['PANEL_HOST'] ?? '127.0.0.1';
   const port = Number.parseInt(process.env['PANEL_PORT'] ?? '8080', 10);
-  return { host, port: Number.isFinite(port) ? port : 8080, loopback: host === '127.0.0.1' || host === 'localhost' || host === '::1' };
+  return { host, port: Number.isFinite(port) ? port : 8080, loopback: isLoopbackBind(host) };
 }
 
 /**
@@ -176,7 +188,15 @@ export function registerSettingsRoutes(app: FastifyInstance, opts: SettingsRoute
     username: opts.username(),
     telegram: opts.store.load().telegram,
     version: opts.version,
-    bind: currentBind(),
+    bind: {
+      host: opts.bindReport.configured.host,
+      port: opts.bindReport.configured.port,
+      loopback: isLoopbackBind(opts.bindReport.effective.host),
+      source: opts.bindReport.source,
+      effectiveHost: opts.bindReport.effective.host,
+      effectivePort: opts.bindReport.effective.port,
+      fallback: opts.bindReport.fallback,
+    },
   }));
 
   app.post('/api/settings', { bodyLimit: 1024 * 1024 }, async (req) => {
@@ -214,5 +234,24 @@ export function registerSettingsRoutes(app: FastifyInstance, opts: SettingsRoute
     // null on disabled/unset/any failure (no token probing feedback).
     if (opts.botUsername === undefined) return { username: null };
     return { username: await opts.botUsername().catch(() => null) };
+  });
+
+  app.post('/api/settings/bind', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    const checked = validateBind(body['host'], body['port']);
+    if (!checked.ok) {
+      reply.code(400);
+      return { error: checked.error };
+    }
+    // Persist only (the listener cannot move without a restart —
+    // the response says so, never silent). The shared holder
+    // re-resolves so GET stays truthful (effective untouched).
+    const store = opts.store.load();
+    store.bind = checked.bind;
+    opts.store.save(store);
+    const resolved = resolveBind(process.env, checked.bind);
+    opts.bindReport.configured = resolved.bind;
+    opts.bindReport.source = resolved.source;
+    return { ok: true, restartRequired: true };
   });
 }

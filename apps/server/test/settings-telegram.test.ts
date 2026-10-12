@@ -307,8 +307,7 @@ describe('server settings routes', () => {
     });
   });
 
-  it('resolves bind from boot env keys with safe defaults', async () => {
-    const { currentBind } = await import('../src/settings.js');
+  it('resolves bind from boot env keys with safe defaults', async () => {    const { currentBind } = await import('../src/settings.js');
     const savedHost = process.env['PANEL_HOST'];
     const savedPort = process.env['PANEL_PORT'];
     try {
@@ -320,6 +319,71 @@ describe('server settings routes', () => {
       expect(currentBind()).toEqual({ host: '0.0.0.0', port: 1899, loopback: false });
       process.env['PANEL_PORT'] = 'junk';
       expect(currentBind().port).toBe(8080);
+    } finally {
+      if (savedHost === undefined) delete process.env['PANEL_HOST'];
+      else process.env['PANEL_HOST'] = savedHost;
+      if (savedPort === undefined) delete process.env['PANEL_PORT'];
+      else process.env['PANEL_PORT'] = savedPort;
+    }
+  });
+
+  it('saves file binds with restart-required and validates shapes', async () => {
+    const savedHost = process.env['PANEL_HOST'];
+    const savedPort = process.env['PANEL_PORT'];
+    delete process.env['PANEL_HOST'];
+    delete process.env['PANEL_PORT'];
+    try {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+    const settings = memorySettings();
+    const api = makeApi();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      settingsStore: settings.store,
+      telegramApi: api,
+    });
+    const cookie = await authedCookie(app);
+
+    const before = await app.inject({ method: 'GET', url: '/api/settings', headers: { cookie } });
+    expect(before.json().bind).toMatchObject({
+      host: '127.0.0.1',
+      port: 8080,
+      loopback: true,
+      source: 'default',
+      effectiveHost: '127.0.0.1',
+      effectivePort: 8080,
+      fallback: false,
+    });
+
+    for (const payload of [
+      { host: '127.0.0.1', port: 80 },
+      { host: 'has space', port: 9090 },
+      { host: '127.0.0.1', port: 99999 },
+      { host: '127.0.0.1' },
+      {},
+    ]) {
+      const bad = await app.inject({ method: 'POST', url: '/api/settings/bind', headers: { cookie }, payload });
+      expect(bad.statusCode).toBe(400);
+      expect(typeof bad.json().error).toBe('string');
+    }
+
+    const saved = await app.inject({
+      method: 'POST',
+      url: '/api/settings/bind',
+      headers: { cookie },
+      payload: { host: '127.0.0.1', port: 9090 },
+    });
+    expect(saved.json()).toEqual({ ok: true, restartRequired: true });
+    expect(settings.saved).toBe(1);
+
+    const after = await app.inject({ method: 'GET', url: '/api/settings', headers: { cookie } });
+    // Persisted and re-resolved, but the live socket is untouched (effective still default).
+    expect(after.json().bind).toMatchObject({ host: '127.0.0.1', port: 9090, source: 'file', effectivePort: 8080 });
+    expect((await app.inject({ method: 'POST', url: '/api/settings/bind', headers: { cookie }, payload: { host: 'x', port: 1 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/settings/bind', headers: { cookie } })).statusCode).toBe(404);
     } finally {
       if (savedHost === undefined) delete process.env['PANEL_HOST'];
       else process.env['PANEL_HOST'] = savedHost;
