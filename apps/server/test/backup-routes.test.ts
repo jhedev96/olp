@@ -8,6 +8,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
+import { hashStream } from '../src/backup.js';
 import { sanitizeBackupName } from '../src/backup.js';
 import type { BackupSystem } from '../src/backup.js';
 import type { DbConfig } from '../src/database.js';
@@ -338,5 +339,40 @@ describe('server backup routes', () => {
     const res = await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } });
     expect(res.json().backups.map((b: { name: string }) => b.name)).toEqual(['new', 'old']);
     expect(res.json().backups[0]).toMatchObject({ file: 'new.zip', size: 2 });
+  });
+
+  it('hashes streams to known vectors', async () => {
+    expect(await hashStream(Readable.from(['abc']))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(await hashStream(Readable.from([]))).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  });
+
+  it('stores hashes at create and verifies them', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    sys.dirs.add(join(root, 'proj'));
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    // Fake exec never materializes the archive: pre-seed it so the stored hash covers real bytes.
+    sys.files.set(join(backupsOf(sys, dataDir), 'h1.zip'), 'ZIPDATA');
+    await app.inject({ method: 'POST', url: '/api/backups', headers: { cookie }, payload: { type: 'folder', name: 'h1', source: 'proj' } });
+    const sidecar = JSON.parse(sys.files.get(join(backupsOf(sys, dataDir), 'h1.json')) ?? '');
+    expect(typeof sidecar.sha256).toBe('string');
+    expect(sidecar.sha256).toHaveLength(64);
+    const verify = await app.inject({ method: 'GET', url: '/api/backups/h1/verify', headers: { cookie } });
+    expect(verify.json()).toEqual({ ok: true, sha256: sidecar.sha256, match: true });
+    expect((await app.inject({ method: 'GET', url: '/api/backups/nope/verify', headers: { cookie } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/backups/h1/verify' })).statusCode).toBe(401);
+  });
+
+  it('verifies pre-hash sidecars as unknown', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    sys.files.set(join(backupsOf(sys, dataDir), 'old.json'), JSON.stringify({ name: 'old', file: 'old.zip', type: 'folder', source: 'b', created: 1 }));
+    sys.files.set(join(backupsOf(sys, dataDir), 'old.zip'), 'x');
+    const verify = await app.inject({ method: 'GET', url: '/api/backups/old/verify', headers: { cookie } });
+    expect(verify.json()).toMatchObject({ ok: true, match: null });
+    expect(typeof verify.json().sha256).toBe('string');
   });
 });

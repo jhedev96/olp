@@ -1,4 +1,5 @@
 import { createReadStream, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
@@ -15,6 +16,8 @@ export interface BackupMeta {
   type: BackupType;
   source: string;
   created: number;
+  /** Hex sha256 of the archive (absent on pre-hash sidecars). */
+  sha256?: string;
 }
 
 /** Sidecar plus live archive stats (list endpoint shape). */
@@ -34,7 +37,7 @@ export interface BackupSystem {
   /** Missing files resolve silently (delete parity). */
   removeFile(path: string): void;
   statFile(path: string): { size: number; mtime: number; isFile: boolean } | null;
-  streamFile(path: string): NodeJS.ReadableStream;
+  streamFile(path: string): NodeJS.ReadableStream & AsyncIterable<string | Buffer>;
 }
 
 /** Inputs for {@link registerBackupRoutes}. */
@@ -168,6 +171,20 @@ async function mustBin(sys: BackupSystem, bin: string, message: string): Promise
   throw new Error(message);
 }
 
+/**
+ * Hex sha256 over an archive stream (node:crypto, no new exec
+ * surface). Stream failures reject (caller maps to 400/500). Real
+ * streams are async-iterable at runtime; the intersection type says
+ * so explicitly (minimal `@types/node` gap, no casts).
+ */
+export function hashStream(stream: NodeJS.ReadableStream & AsyncIterable<string | Buffer>): Promise<string> {
+  return (async () => {
+    const hash = createHash('sha256');
+    for await (const chunk of stream) hash.update(chunk);
+    return hash.digest('hex');
+  })();
+}
+
 function mysqlCommand(cfg: DbConfig, tool: 'mysqldump' | 'mysql', db: string, file: string, direction: '>' | '<'): string {
   const pw = cfg.password === '' ? '' : ` --password=${quote(cfg.password)}`;
   return (
@@ -234,10 +251,23 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
         );
       }
     }
-    sys.writeFile(metaPath(opts.dataDir, name), JSON.stringify({ name, file, type, source, created: now() }, null, 2), {
-      mode: 0o600,
-    });
+    sys.writeFile(
+      metaPath(opts.dataDir, name),
+      JSON.stringify({ name, file, type, source, created: now(), sha256: await hashStream(sys.streamFile(join(dir, file))) }, null, 2),
+      { mode: 0o600 },
+    );
     return { ok: true, name };
+  });
+
+  app.get('/api/backups/:name/verify', async (req) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const name = typeof params['name'] === 'string' ? params['name'] : '';
+    const meta = validBackupName(name) ? readMeta(sys, opts.dataDir, name) : null;
+    if (meta === null) throw new Error('Backup not found');
+    const full = join(dir, meta.file);
+    if (sys.statFile(full) === null) throw new Error('Backup file is missing');
+    const sha256 = await hashStream(sys.streamFile(full));
+    return { ok: true, sha256, match: meta.sha256 === undefined ? null : meta.sha256 === sha256 };
   });
 
   app.get('/api/backups/:name/download', async (req, reply) => {
