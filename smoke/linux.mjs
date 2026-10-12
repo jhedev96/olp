@@ -78,6 +78,44 @@ check('static outside jail rejected', evil.error === 'Access outside working dir
 // settings + store + proxy + cron (no daemons here)
 check('settings get', json('GET', '/api/settings').username === U);
 check('settings save', json('POST', '/api/settings', { telegram: { enabled: false } }).ok === true);
+
+// device sessions wave 8 (two-jar lifecycle; the other jar is revoked in-flow)
+// Note: the script logs in twice up front, so the baseline is 2, not 1.
+const sessionBaseline = json('GET', '/api/auth/sessions').sessions.length;
+const cj2 = '/tmp/olp-smoke-cj2.txt';
+execSync(`curl -s -c ${cj2} -X POST ${BASE}/api/login -H 'Content-Type: application/json' -A 'Mozilla/5.0 (Android 14; Mobile; rv:126.0) Gecko/126.0 Firefox/126.0' -d '{"username":"${U}","password":"${P}"}'`, { encoding: 'utf8' });
+const j2 = (method, path, body) =>
+  JSON.parse(
+    execFileSync(
+      'curl',
+      ['-s', '-b', cj2, '-X', method, `${BASE}${path}`, ...(body !== undefined ? ['-H', 'Content-Type: application/json', '-d', JSON.stringify(body)] : [])],
+      { encoding: 'utf8' },
+    ) || 'null',
+  );
+const sessionsA = json('GET', '/api/auth/sessions').sessions;
+check(
+  'sessions list grows by one with current',
+  sessionsA.length === sessionBaseline + 1 &&
+    sessionsA.filter((s) => s.current).length === 1 &&
+    sessionsA.every((s) => /^[0-9a-f]{8}$/.test(s.id) && typeof s.browser === 'string' && typeof s.ip === 'string') &&
+    sessionsA.some((s) => s.browser === 'Firefox 126.0 Mobile'),
+);
+const sessionsB = j2('GET', '/api/auth/sessions').sessions;
+check(
+  'sessions current flips per jar',
+  sessionsB.filter((s) => s.current).length === 1 &&
+    sessionsB.find((s) => s.current).id !== sessionsA.find((s) => s.current).id,
+);
+const otherId = sessionsA.find((s) => s.browser === 'Firefox 126.0 Mobile').id;
+check('sessions revoke other', json('POST', `/api/auth/sessions/${otherId}/revoke`).ok === true);
+check('sessions revoked jar dies', j2('GET', '/api/me').error === 'Not logged in');
+check('sessions unknown 404', json('POST', '/api/auth/sessions/deadbeef/revoke').error === 'Unknown session');
+const othersCleanup = json('POST', '/api/auth/sessions/others/revoke');
+check(
+  'sessions others revoke rest',
+  othersCleanup.revoked === sessionsA.length - 2 &&
+    json('GET', '/api/auth/sessions').sessions.length === 1,
+);
 check('store list has nginx', json('GET', '/api/install').items.some((i) => i.id === 'nginx'));
 
 // store extras wave 7 (versions, update, mirror — honest fail allowed offline, hang never)
