@@ -25,6 +25,19 @@ const SETTINGS = {
   telegram: { botToken: 'tok', chatId: '123', enabled: true, commandsEnabled: false },
 };
 
+const SESSIONS = {
+  sessions: [
+    { id: 'a1b2c3d4', browser: 'Chrome 124.0', os: 'macOS 14.4', ip: '192.168.1.104', created: 1000, lastSeen: 2000, current: true },
+    { id: 'e5f60718', browser: 'Firefox 126.0 Mobile', os: 'Android 14', ip: '192.168.1.185', created: 1500, lastSeen: 2500, current: false },
+  ],
+};
+
+function sessionsHandler(url: string): { status: number; json: unknown } {
+  if (url === '/api/settings') return { status: 200, json: SETTINGS };
+  if (url === '/api/auth/sessions') return { status: 200, json: SESSIONS };
+  return { status: 200, json: { ok: true } };
+}
+
 describe('web settings page', () => {
   it('loads username, version, and telegram state', async () => {
     stubApi((url) => (url === '/api/settings' ? { status: 200, json: SETTINGS } : { status: 200, json: { ok: true } }));
@@ -140,7 +153,7 @@ describe('web settings page', () => {
       fireEvent.click(screen.getByText('Save telegram'));
     });
     expect(screen.getByRole('status').textContent).toBe('Telegram saved');
-    expect(screen.getByText('CAND-030')).not.toBeNull();
+    expect(screen.queryByText('CAND-030')).toBeNull();
     expect(screen.getByText('CAND-031')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Export JSON' })).not.toBeNull();
   });
@@ -156,5 +169,63 @@ describe('web settings page', () => {
     expect(screen.getByText('Strong')).not.toBeNull();
     expect(screen.getByText('pm2 restart olp')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Copy command' })).not.toBeNull();
+  });
+
+  it('lists sessions with this-device badge and no self revoke', async () => {
+    stubApi((url) => sessionsHandler(url));
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    expect(screen.getByText('Active device sessions')).not.toBeNull();
+    expect(screen.getByText('2 connected')).not.toBeNull();
+    expect(screen.getByText('Chrome 124.0')).not.toBeNull();
+    expect(screen.getByText('Firefox 126.0 Mobile')).not.toBeNull();
+    expect(screen.getByText('THIS DEVICE')).not.toBeNull();
+    expect(screen.getAllByText('Revoke')).toHaveLength(1);
+    expect(screen.getByText('Log out other sessions')).not.toBeNull();
+  });
+
+  it('revokes a session through the dialog and reloads', async () => {
+    const { calls } = stubApi((url, method) => {
+      if (url === '/api/settings') return { status: 200, json: SETTINGS };
+      if (url === '/api/auth/sessions' && method === 'GET') return { status: 200, json: SESSIONS };
+      if (url === '/api/auth/sessions/e5f60718/revoke') return { status: 200, json: { ok: true, self: false } };
+      return { status: 200, json: { ok: true } };
+    });
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Revoke'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('Firefox 126.0 Mobile');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Revoke' }));
+    });
+    expect(calls.some((c) => c.url === '/api/auth/sessions/e5f60718/revoke' && c.method === 'POST')).toBe(true);
+    expect(calls.filter((c) => c.url === '/api/auth/sessions').length).toBeGreaterThan(1);
+  });
+
+  it('logs out other sessions without leaving', async () => {
+    const seen: string[] = [];
+    const { calls } = stubApi((url, method) => {
+      if (url === '/api/settings') return { status: 200, json: SETTINGS };
+      if (url === '/api/auth/sessions' && method === 'GET') return { status: 200, json: SESSIONS };
+      if (url === '/api/auth/sessions/others/revoke') return { status: 200, json: { ok: true, revoked: 1 } };
+      if (url === '/api/auth/sessions/a1b2c3d4/revoke') return { status: 200, json: { ok: true, self: true } };
+      return { status: 200, json: { ok: true } };
+    });
+    await act(async () => {
+      render(<SettingsPage goto={(url) => seen.push(url)} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Log out other sessions'));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Log out others' }));
+    });
+    expect(calls.some((c) => c.url === '/api/auth/sessions/others/revoke')).toBe(true);
+    expect(seen).toEqual([]);
   });
 });

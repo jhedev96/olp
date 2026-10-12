@@ -28,6 +28,17 @@ export function fmtUptime(sec: number): string {
   return `${mins}m`;
 }
 
+/** Millis epoch → `just now` / `5m ago` / `2h ago` / `Yesterday` / `3d ago` (sessions table). */
+export function fmtAgo(ms: number, now: number = Date.now()): string {
+  const mins = Math.floor(Math.max(0, now - ms) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  if (hours < 48) return 'Yesterday';
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 /**
  * HTML-escape anything interpolated into markup — the single XSS line
  * of defense. Numbers/booleans stringify safely; objects stringify too.
