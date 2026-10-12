@@ -57,6 +57,8 @@ export interface SysDeps {
   freemem: () => number;
   hostname: () => string;
   uptime: () => number;
+  /** CPU architecture string (production: `os.arch()`). */
+  arch: () => string;
   exec: ExecFn;
   readDir: (path: string) => string[];
   readFile: (path: string) => string | null;
