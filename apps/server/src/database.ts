@@ -397,6 +397,18 @@ function strQuery(query: unknown, key: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Valid database identifiers (letters, digits, `_`, `$`; 1–64 chars). */
+export function validDbName(name: string): boolean {
+  return /^[A-Za-z0-9_$]+$/.test(name) && name.length <= 64;
+}
+
+/** Map CREATE DATABASE driver errors to HTTP shapes. */
+function createStatus(message: string): number {
+  if (/database exists|already exists|42P04|\b1007\b/i.test(message)) return 409;
+  if (/denied|not allowed|permission|42501|1044|1045|1142/i.test(message)) return 403;
+  return 500;
+}
+
 /**
  * Register database-manager endpoints (all behind the session gate).
  * `test` always answers HTTP 200 (Terwo quirk parity); other failures
@@ -468,6 +480,43 @@ export function registerDatabaseRoutes(app: FastifyInstance, opts: DatabaseOptio
       const conn = live.get(engine);
       if (conn === undefined) throw new Error('Not connected');
       return { databases: await driver.listDatabases(conn) };
+    });
+
+    app.post(`${base}/databases`, { bodyLimit: 1024 * 1024 }, async (req, reply) => {
+      const conn = live.get(engine);
+      if (conn === undefined) throw new Error('Not connected');
+      const body = ((req.body ?? {}) as Record<string, unknown>);
+      const name = typeof body['name'] === 'string' ? body['name'].trim() : '';
+      if (!validDbName(name)) {
+        reply.code(400);
+        return { error: 'Invalid database name (letters, digits, _ and $, max 64)' };
+      }
+      try {
+        await driver.createDatabase(storedConfig(opts.registry, engine), name);
+        return { ok: true, databases: await driver.listDatabases(conn) };
+      } catch (err) {
+        const message = err instanceof Error && err.message !== '' ? err.message : 'Create failed';
+        reply.code(createStatus(message));
+        return { error: message };
+      }
+    });
+
+    app.get(`${base}/schema`, async (req) => {
+      const conn = live.get(engine);
+      if (conn === undefined) throw new Error('Not connected');
+      const db = strQuery(req.query, 'db');
+      if (db === '') throw new Error('Database must be selected');
+      return { tables: await driver.tableStats(storedConfig(opts.registry, engine), db) };
+    });
+
+    app.get(`${base}/ddl`, async (req) => {
+      const conn = live.get(engine);
+      if (conn === undefined) throw new Error('Not connected');
+      const db = strQuery(req.query, 'db');
+      const table = strQuery(req.query, 'table');
+      if (db === '' || table === '') throw new Error('Database and table are required');
+      if (db.length > 128 || table.length > 128) throw new Error('Name too long');
+      return driver.tableDef(storedConfig(opts.registry, engine), db, table);
     });
 
     app.get(`${base}/tables`, async (req) => {
