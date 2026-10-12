@@ -39,6 +39,16 @@ export function fmtAgo(ms: number, now: number = Date.now()): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Future millis epoch → `in 5h` / `in 30d` (session expiry); past answers `expired`. */
+export function fmtIn(ms: number, now: number = Date.now()): string {
+  const mins = Math.floor((ms - now) / 60000);
+  if (mins < 1) return 'expired';
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `in ${hours}h`;
+  return `in ${Math.floor(hours / 24)}d`;
+}
+
 /**
  * HTML-escape anything interpolated into markup — the single XSS line
  * of defense. Numbers/booleans stringify safely; objects stringify too.

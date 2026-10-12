@@ -3,6 +3,9 @@ import { randomBytes } from 'node:crypto';
 /** Session lifetime: 24h absolute from creation (Terwo parity, no sliding). */
 export const SESSION_TTL_MS = 86400 * 1000;
 
+/** Remembered session lifetime: 30 days (login checkbox opt-in). */
+export const REMEMBER_TTL_MS = 30 * 86400 * 1000;
+
 /** Public session id size (8 random hex chars; tokens stay 64-hex secrets). */
 const PUBLIC_ID_BYTES = 4;
 
@@ -18,12 +21,21 @@ export interface SessionInfo extends SessionMeta {
   id: string;
   created: number;
   lastSeen: number;
+  /** Absolute expiry (`created + ttlMs`); honored by every method. */
+  expiresAt: number;
   current: boolean;
+}
+
+/** Creation options (TTL pairs with the cookie `Max-Age` — drift is a bug). */
+export interface CreateOptions {
+  ttlMs?: number;
+  now?: number;
 }
 
 interface Session extends SessionMeta {
   created: number;
   lastSeen: number;
+  expiresAt: number;
   publicId: string;
 }
 
@@ -57,7 +69,7 @@ export class SessionStore {
     if (typeof token !== 'string' || token === '') return null;
     const session = this.sessions.get(token);
     if (session === undefined) return null;
-    if (now - session.created > SESSION_TTL_MS) {
+    if (now > session.expiresAt) {
       this.sessions.delete(token);
       return null;
     }
@@ -65,9 +77,11 @@ export class SessionStore {
   }
 
   /** Create a session, returning its 32-byte hex token. */
-  create(meta: SessionMeta, now: number = Date.now()): string {
+  create(meta: SessionMeta, options: CreateOptions = {}): string {
+    const now = options.now ?? Date.now();
+    const ttlMs = options.ttlMs ?? SESSION_TTL_MS;
     const token = randomBytes(32).toString('hex');
-    this.sessions.set(token, { ...meta, created: now, lastSeen: now, publicId: this.freshId() });
+    this.sessions.set(token, { ...meta, created: now, lastSeen: now, expiresAt: now + ttlMs, publicId: this.freshId() });
     return token;
   }
 
@@ -111,6 +125,7 @@ export class SessionStore {
         ip: session.ip,
         created: session.created,
         lastSeen: session.lastSeen,
+        expiresAt: session.expiresAt,
         current: token === currentToken,
       });
     }
@@ -166,7 +181,7 @@ export class SessionStore {
   prune(now: number = Date.now()): number {
     let removed = 0;
     for (const [token, session] of this.sessions) {
-      if (now - session.created > SESSION_TTL_MS) {
+      if (now > session.expiresAt) {
         this.sessions.delete(token);
         removed++;
       }

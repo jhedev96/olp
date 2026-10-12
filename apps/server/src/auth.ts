@@ -14,6 +14,7 @@ import {
   verifyCredentials,
 } from '@olp/auth';
 import type { AuthConfig, SessionMeta } from '@olp/auth';
+import { REMEMBER_MAX_AGE, REMEMBER_TTL_MS } from '@olp/auth';
 
 /** Resolved credential directories. */
 export interface ServerDirs {
@@ -84,6 +85,7 @@ function requestMeta(req: Pick<FastifyRequest, 'headers' | 'ip'>): SessionMeta {
 interface LoginBody {
   username?: unknown;
   password?: unknown;
+  remember?: unknown;
 }
 
 interface ChangeUsernameBody {
@@ -123,7 +125,11 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
       reply.code(401);
       return { error: 'Invalid username or password' };
     }
-    reply.header('Set-Cookie', loginCookie(ctx.store.create(requestMeta(req))));
+    // Remember-me pairs both sides (cookie age + session TTL) —
+    // one without the other is a bug by definition.
+    const remember = body.remember === true;
+    const token = ctx.store.create(requestMeta(req), remember ? { ttlMs: REMEMBER_TTL_MS } : undefined);
+    reply.header('Set-Cookie', loginCookie(token, remember ? REMEMBER_MAX_AGE : undefined));
     return { ok: true };
   });
 

@@ -246,6 +246,86 @@ describe('server settings routes', () => {
     expect(bad.statusCode).toBe(400);
     expect(bad.json()).toEqual({ ok: false, error: 'Bad token' });
   });
+
+  it('serves bind info and telegram identity states', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const settings = memorySettings();
+    const api = makeApi();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      settingsStore: settings.store,
+      telegramApi: api,
+      settingsBotUsername: () => Promise.resolve('TerwoNodeBot'),
+    });
+    const cookie = await authedCookie(app);
+    const get = await app.inject({ method: 'GET', url: '/api/settings', headers: { cookie } });
+    const bind = get.json().bind as { host: unknown; port: unknown; loopback: unknown };
+    expect(typeof bind.host).toBe('string');
+    expect(typeof bind.port).toBe('number');
+    expect(typeof bind.loopback).toBe('boolean');
+
+    expect((await app.inject({ method: 'GET', url: '/api/settings/telegram/identity', headers: { cookie } })).json()).toEqual({
+      username: 'TerwoNodeBot',
+    });
+    expect((await app.inject({ method: 'GET', url: '/api/settings/telegram/identity' })).statusCode).toBe(401);
+  });
+
+  it('answers identity null without a thunk or on failure', async () => {    const w1 = freshWorkspace();
+    const { app } = buildServer({
+      dataDir: w1.dataDir,
+      legacyDir: w1.legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root: w1.root,
+      settingsStore: memorySettings().store,
+      telegramApi: makeApi(),
+    });
+    const cookie = await authedCookie(app);
+    expect((await app.inject({ method: 'GET', url: '/api/settings/telegram/identity', headers: { cookie } })).json()).toEqual({
+      username: null,
+    });
+
+    const w2 = freshWorkspace();
+    const { app: app2 } = buildServer({
+      dataDir: w2.dataDir,
+      legacyDir: w2.legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root: w2.root,
+      settingsStore: memorySettings().store,
+      telegramApi: makeApi(),
+      settingsBotUsername: () => Promise.reject(new Error('offline')),
+    });
+    const cookie2 = await authedCookie(app2);
+    expect((await app2.inject({ method: 'GET', url: '/api/settings/telegram/identity', headers: { cookie: cookie2 } })).json()).toEqual({
+      username: null,
+    });
+  });
+
+  it('resolves bind from boot env keys with safe defaults', async () => {
+    const { currentBind } = await import('../src/settings.js');
+    const savedHost = process.env['PANEL_HOST'];
+    const savedPort = process.env['PANEL_PORT'];
+    try {
+      delete process.env['PANEL_HOST'];
+      delete process.env['PANEL_PORT'];
+      expect(currentBind()).toEqual({ host: '127.0.0.1', port: 8080, loopback: true });
+      process.env['PANEL_HOST'] = '0.0.0.0';
+      process.env['PANEL_PORT'] = '1899';
+      expect(currentBind()).toEqual({ host: '0.0.0.0', port: 1899, loopback: false });
+      process.env['PANEL_PORT'] = 'junk';
+      expect(currentBind().port).toBe(8080);
+    } finally {
+      if (savedHost === undefined) delete process.env['PANEL_HOST'];
+      else process.env['PANEL_HOST'] = savedHost;
+      if (savedPort === undefined) delete process.env['PANEL_PORT'];
+      else process.env['PANEL_PORT'] = savedPort;
+    }
+  });
 });
 
 describe('server telegram bot', () => {

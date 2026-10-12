@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  REMEMBER_MAX_AGE,
+  REMEMBER_TTL_MS,
   SESSION_TTL_MS,
   changePassword,
   changeUsername,
@@ -162,8 +164,8 @@ describe('sessions', () => {
 
   it('creates unique hex tokens and validates', () => {
     const store = new SessionStore();
-    const a = store.create(META, 1000);
-    const b = store.create(META, 1000);
+    const a = store.create(META, { now: 1000 });
+    const b = store.create(META, { now: 1000 });
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(a).not.toBe(b);
     expect(store.validate(a, 1000)).toBe(true);
@@ -174,7 +176,7 @@ describe('sessions', () => {
 
   it('expires absolutely with lazy delete', () => {
     const store = new SessionStore();
-    const t = store.create(META, 1000);
+    const t = store.create(META, { now: 1000 });
     expect(store.validate(t, 1000 + SESSION_TTL_MS)).toBe(true);
     expect(store.validate(t, 1000 + SESSION_TTL_MS + 1)).toBe(false);
     expect(store.size).toBe(0);
@@ -182,9 +184,9 @@ describe('sessions', () => {
 
   it('prunes, revokes, and clears', () => {
     const store = new SessionStore();
-    const a = store.create(META, 1000);
-    store.create(META, 1000);
-    store.create(META, 5000);
+    const a = store.create(META, { now: 1000 });
+    store.create(META, { now: 1000 });
+    store.create(META, { now: 5000 });
     expect(store.prune(1000 + SESSION_TTL_MS + 1)).toBe(2);
     expect(store.size).toBe(1);
     store.revoke(a);
@@ -195,8 +197,8 @@ describe('sessions', () => {
 
   it('lists live sessions with ids, flags, and no tokens', () => {
     const store = new SessionStore();
-    const a = store.create(META, 1000);
-    const b = store.create({ ...META, ip: '192.168.1.185' }, 2000);
+    const a = store.create(META, { now: 1000 });
+    const b = store.create({ ...META, ip: '192.168.1.185' }, { now: 2000 });
     const rows = store.list(a, 3000);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ browser: 'Chrome 124.0', ip: '192.168.1.104', created: 1000, lastSeen: 1000, current: true });
@@ -212,7 +214,7 @@ describe('sessions', () => {
 
   it('touches last-seen metadata and drops dead tokens', () => {
     const store = new SessionStore();
-    const a = store.create(META, 1000);
+    const a = store.create(META, { now: 1000 });
     expect(store.touch(a, { ...META, ip: '10.0.0.9' }, 9000)).toBe(true);
     expect(store.list(a, 9000)[0]).toMatchObject({ lastSeen: 9000, ip: '10.0.0.9' });
     expect(store.touch('missing', META, 9000)).toBe(false);
@@ -223,8 +225,8 @@ describe('sessions', () => {
 
   it('revokes by id with self detection and others with counts', () => {
     const store = new SessionStore();
-    const a = store.create(META, 1000);
-    store.create(META, 1000);
+    const a = store.create(META, { now: 1000 });
+    store.create(META, { now: 1000 });
     const ids = store.list(null, 1000).map((r) => r.id);
     expect(store.revokeById('deadbeef', a, 1000)).toBeNull();
     expect(store.revokeById(ids[1] ?? '', a, 1000)).toEqual({ revoked: true, self: false });
@@ -235,13 +237,35 @@ describe('sessions', () => {
 
   it('revokes others keeping the caller', () => {
     const store = new SessionStore();
-    const a = store.create(META, 1000);
-    store.create(META, 1000);
-    store.create(META, 1000);
+    const a = store.create(META, { now: 1000 });
+    store.create(META, { now: 1000 });
+    store.create(META, { now: 1000 });
     expect(store.revokeOthers(a, 2000)).toBe(2);
     expect(store.list(a, 2000)).toHaveLength(1);
     expect(store.revokeOthers('ghost', 2000)).toBe(1);
     expect(store.size).toBe(0);
+  });
+
+  it('honors per-session TTL with paired expiry', () => {
+    const store = new SessionStore();
+    const day = store.create(META, { now: 1000 });
+    const month = store.create(META, { ttlMs: REMEMBER_TTL_MS, now: 1000 });
+    expect(store.list(day, 1000)[0]).toMatchObject({ expiresAt: 1000 + SESSION_TTL_MS });
+    expect(store.list(month, 1000)[1]).toMatchObject({ expiresAt: 1000 + REMEMBER_TTL_MS });
+    // The default session dies at 24h while the remembered one survives.
+    expect(store.validate(day, 1000 + SESSION_TTL_MS + 1)).toBe(false);
+    expect(store.validate(month, 1000 + SESSION_TTL_MS + 1)).toBe(true);
+    expect(store.validate(month, 1000 + REMEMBER_TTL_MS)).toBe(true);
+    expect(store.validate(month, 1000 + REMEMBER_TTL_MS + 1)).toBe(false);
+    expect(store.size).toBe(0);
+  });
+
+  it('prunes mixed lifetimes independently', () => {
+    const store = new SessionStore();
+    store.create(META, { now: 1000 });
+    store.create(META, { ttlMs: REMEMBER_TTL_MS, now: 1000 });
+    expect(store.prune(1000 + SESSION_TTL_MS + 1)).toBe(1);
+    expect(store.size).toBe(1);
   });
 });
 
@@ -279,6 +303,7 @@ describe('cookies', () => {
 
   it('serializes flags byte-identical to Terwo', () => {
     expect(loginCookie('TOKEN')).toBe('tpsid=TOKEN; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400');
+    expect(loginCookie('TOKEN', REMEMBER_MAX_AGE)).toBe('tpsid=TOKEN; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000');
     expect(clearCookie()).toBe('tpsid=; HttpOnly; Path=/; Max-Age=0');
   });
 

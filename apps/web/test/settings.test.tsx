@@ -27,14 +27,20 @@ const SETTINGS = {
 
 const SESSIONS = {
   sessions: [
-    { id: 'a1b2c3d4', browser: 'Chrome 124.0', os: 'macOS 14.4', ip: '192.168.1.104', created: 1000, lastSeen: 2000, current: true },
-    { id: 'e5f60718', browser: 'Firefox 126.0 Mobile', os: 'Android 14', ip: '192.168.1.185', created: 1500, lastSeen: 2500, current: false },
+    { id: 'a1b2c3d4', browser: 'Chrome 124.0', os: 'macOS 14.4', ip: '192.168.1.104', created: 1000, lastSeen: 2000, expiresAt: Date.now() + 86400000, current: true },
+    { id: 'e5f60718', browser: 'Firefox 126.0 Mobile', os: 'Android 14', ip: '192.168.1.185', created: 1500, lastSeen: 2500, expiresAt: Date.now() + 30 * 86400000, current: false },
   ],
 };
 
+const SETTINGS_BIND = {
+  ...SETTINGS,
+  bind: { host: '127.0.0.1', port: 8080, loopback: true },
+};
+
 function sessionsHandler(url: string): { status: number; json: unknown } {
-  if (url === '/api/settings') return { status: 200, json: SETTINGS };
+  if (url === '/api/settings') return { status: 200, json: SETTINGS_BIND };
   if (url === '/api/auth/sessions') return { status: 200, json: SESSIONS };
+  if (url === '/api/settings/telegram/identity') return { status: 200, json: { username: 'TerwoNodeBot' } };
   return { status: 200, json: { ok: true } };
 }
 
@@ -154,7 +160,8 @@ describe('web settings page', () => {
     });
     expect(screen.getByRole('status').textContent).toBe('Telegram saved');
     expect(screen.queryByText('CAND-030')).toBeNull();
-    expect(screen.getByText('CAND-031')).not.toBeNull();
+    expect(screen.queryByText('CAND-031')).toBeNull();
+    expect(screen.getByText('Bind address')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Export JSON' })).not.toBeNull();
   });
 
@@ -183,6 +190,36 @@ describe('web settings page', () => {
     expect(screen.getByText('THIS DEVICE')).not.toBeNull();
     expect(screen.getAllByText('Revoke')).toHaveLength(1);
     expect(screen.getByText('Log out other sessions')).not.toBeNull();
+  });
+
+  it('shows the verified badge, bind card, and row expiry', async () => {
+    stubApi((url) => sessionsHandler(url));
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    expect(screen.getByText('Verified: @TerwoNodeBot')).not.toBeNull();
+    expect(screen.getByText('Bind address')).not.toBeNull();
+    expect(screen.getByText('127.0.0.1:8080')).not.toBeNull();
+    expect(screen.getByText('Loopback only')).not.toBeNull();
+    expect(screen.getAllByText(/Expires in /)).toHaveLength(2);
+    expect(screen.queryByText('CAND-031')).toBeNull();
+  });
+
+  it('falls back to unverified and LAN warning honestly', async () => {
+    stubApi((url) => {
+      if (url === '/api/settings') {
+        return { status: 200, json: { ...SETTINGS, bind: { host: '0.0.0.0', port: 8080, loopback: false } } };
+      }
+      if (url === '/api/settings/telegram/identity') return { status: 200, json: { username: null } };
+      if (url === '/api/auth/sessions') return { status: 200, json: { sessions: [] } };
+      return { status: 200, json: { ok: true } };
+    });
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    expect(screen.getByText('Unverified')).not.toBeNull();
+    expect(screen.getByText('LAN exposed — do not put on the internet')).not.toBeNull();
+    expect(screen.getByText('No active sessions.')).not.toBeNull();
   });
 
   it('revokes a session through the dialog and reloads', async () => {

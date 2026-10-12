@@ -62,6 +62,24 @@ describe('web login page (React)', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('posts the remember flag when checked', async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      if (typeof init?.body === 'string') bodies.push(JSON.parse(init.body));
+      return Promise.resolve(jsonResponse(200, { ok: true }));
+    });
+    await act(async () => {
+      render(<LoginPage goto={() => undefined} />);
+    });
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'ops' } });
+    fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 's3cret' } });
+    fireEvent.click(screen.getByLabelText(/Remember session/));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+    });
+    expect(bodies.some((b) => (b as { remember?: unknown }).remember === true)).toBe(true);
+  });
+
   it('shows the server message on bad credentials without navigating', async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(jsonResponse(401, { error: 'Invalid username or password' })));
     const seen: string[] = [];

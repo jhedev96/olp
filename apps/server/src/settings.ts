@@ -71,6 +71,22 @@ export interface SettingsRouteOptions {
   onTelegramConfig: () => void;
   /** Deliver the test message (throws with the send error on failure). */
   testSend: (tg: TelegramSettings) => Promise<void>;
+  /** Bot username for the verified badge (null = unverified; defaults to a stored-token getMe — tests inject). */
+  botUsername?: () => Promise<string | null>;
+}
+
+/** Bind address info (read-only; editing needs a restart-capable config — CAND-037). */
+export interface BindInfo {
+  host: string;
+  port: number;
+  loopback: boolean;
+}
+
+/** Boot bind source of truth (same keys and defaults as `main()` listen). */
+export function currentBind(): BindInfo {
+  const host = process.env['PANEL_HOST'] ?? '127.0.0.1';
+  const port = Number.parseInt(process.env['PANEL_PORT'] ?? '8080', 10);
+  return { host, port: Number.isFinite(port) ? port : 8080, loopback: host === '127.0.0.1' || host === 'localhost' || host === '::1' };
 }
 
 /**
@@ -83,6 +99,7 @@ export function registerSettingsRoutes(app: FastifyInstance, opts: SettingsRoute
     username: opts.username(),
     telegram: opts.store.load().telegram,
     version: opts.version,
+    bind: currentBind(),
   }));
 
   app.post('/api/settings', { bodyLimit: 1024 * 1024 }, async (req) => {
@@ -112,5 +129,13 @@ export function registerSettingsRoutes(app: FastifyInstance, opts: SettingsRoute
       reply.code(400);
       return { ok: false as const, error: message === '' ? 'Failed to send' : message };
     }
+  });
+
+  app.get('/api/settings/telegram/identity', async () => {
+    // Stored token only (request bodies never supply tokens — a
+    // client-supplied token would turn this into an oracle). Silent
+    // null on disabled/unset/any failure (no token probing feedback).
+    if (opts.botUsername === undefined) return { username: null };
+    return { username: await opts.botUsername().catch(() => null) };
   });
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api, apiJson, wsUrl } from '../src/lib/api.js';
-import { esc, fmtAgo, fmtDate, fmtSize, fmtUptime } from '../src/lib/format.js';
+import { esc, fmtAgo, fmtDate, fmtIn, fmtSize, fmtUptime } from '../src/lib/format.js';
 import { navigate, slugFromPath } from '../src/lib/router.js';
 import type { HistoryLike } from '../src/lib/router.js';
 import { getTheme, setTheme } from '../src/lib/theme.js';
@@ -117,6 +117,15 @@ describe('web lib/format', () => {
     expect(fmtAgo(now - 30 * 3600000, now)).toBe('Yesterday');
     expect(fmtAgo(now - 3 * 86400000, now)).toBe('3d ago');
     expect(fmtAgo(now + 60000, now)).toBe('just now');
+  });
+
+  it('formats future expiry times', () => {
+    const now = 1728470400000;
+    expect(fmtIn(now, now)).toBe('expired');
+    expect(fmtIn(now - 60000, now)).toBe('expired');
+    expect(fmtIn(now + 5 * 60000, now)).toBe('in 5m');
+    expect(fmtIn(now + 5 * 3600000, now)).toBe('in 5h');
+    expect(fmtIn(now + 30 * 86400000, now)).toBe('in 30d');
   });
 
   it('escapes markup', () => {

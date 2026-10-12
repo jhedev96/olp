@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
-import { fmtAgo } from '../lib/format.js';
+import { fmtAgo, fmtIn } from '../lib/format.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Badge } from '../components/common/Badge.js';
-import { ComingSoon } from '../components/common/States.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
@@ -32,7 +31,15 @@ export interface SessionRow {
   ip: string;
   created: number;
   lastSeen: number;
+  expiresAt: number;
   current: boolean;
+}
+
+/** `/api/settings` bind shape (server contract). */
+export interface BindState {
+  host: string;
+  port: number;
+  loopback: boolean;
 }
 
 /** Settings page inputs (tests inject navigation + timers). */
@@ -46,11 +53,12 @@ export interface SettingsPageDeps {
  * change-username, change-password (client confirm check, field clear,
  * delayed login redirect), telegram form + save + test button,
  * config export/copy, dialog-gated logout-all. Saved actions toast.
- * Honestly omitted (no source, backend frozen): PBKDF2 rounds text and
- * rehash-on-boot flag (the flag has no cryptographic effect and the
- * mockup's 310k contradicts the real 120k — CAND-031 decision pending),
- * bind controls + verified badge (CAND-031). Device sessions are real
- * (parsed-only in-memory metadata, CAND-030 closed wave 8).
+ * Server config is real (wave 9, CAND-031 core): telegram verified
+ * badge (stored-token proxy), read-only bind card with loopback
+ * badge, per-row session expiry. The mockup's PBKDF2 310k text and
+ * rehash-on-boot flag are dropped — the flag has no cryptographic
+ * effect and 310k contradicts the real 120k in `packages/auth`
+ * (spec-server-config-wave §10). Editable bind → CAND-037.
  */
 export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const goto =
@@ -75,6 +83,8 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [pendingRevoke, setPendingRevoke] = useState<SessionRow | null>(null);
   const [confirmOthers, setConfirmOthers] = useState(false);
+  const [botName, setBotName] = useState<string | null | undefined>(undefined);
+  const [bind, setBind] = useState<BindState | null>(null);
   const [toast, setToast] = useState('');
   const [copied, setCopied] = useState(false);
   const [reloadCopied, setReloadCopied] = useState(false);
@@ -84,10 +94,12 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       const body = await apiJson<{
         username: string;
         version: string;
+        bind?: BindState;
         telegram: { botToken: string; chatId: string; enabled: boolean; commandsEnabled: boolean };
       }>('/api/settings');
       setUsername(body.username);
       setVersion(body.version);
+      if (body.bind !== undefined && typeof body.bind === 'object' && body.bind !== null) setBind(body.bind);
       const telegram = body.telegram;
       setTg({
         botToken: telegram.botToken,
@@ -103,6 +115,19 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadIdentity = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ username: string | null }>('/api/settings/telegram/identity');
+      setBotName(typeof body.username === 'string' ? body.username : null);
+    } catch {
+      setBotName(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadIdentity();
+  }, [loadIdentity]);
 
   const loadSessions = useCallback(async (): Promise<void> => {
     try {
@@ -196,6 +221,9 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
     } catch (err) {
       setTgMessage(err instanceof ApiError ? err.message : 'Failed');
     }
+    // Token may have changed: re-verify the badge.
+    setBotName(undefined);
+    await loadIdentity();
   };
 
   const testTelegram = async (): Promise<void> => {
@@ -306,7 +334,16 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       </Card>
 
       <Card className="mb-3">
-        <h2 className="mb-2 font-bold">Telegram</h2>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="mr-auto font-bold">Telegram</h2>
+          {botName === undefined ? (
+            <span className="text-xs text-neutral-500">Checking bot…</span>
+          ) : botName === null ? (
+            <Badge tone="neutral">Unverified</Badge>
+          ) : (
+            <Badge tone="success">Verified: @{botName}</Badge>
+          )}
+        </div>
         {tgMessage !== '' && <p className="mb-2 text-sm text-neutral-300">{tgMessage}</p>}
         <div className="flex flex-wrap items-center gap-2">
           <Input placeholder="Bot token" value={tg.botToken} onChange={(ev) => setTg({ ...tg, botToken: ev.target.value })} className="w-64" />
@@ -369,7 +406,7 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
                   <span className="mr-auto min-w-0">
                     <span className="font-medium">{session.browser}</span>
                     <span className="block font-mono text-xs text-neutral-400">
-                      {session.ip} • {session.os} • {fmtAgo(session.lastSeen)}
+                      {session.ip} • {session.os} • {fmtAgo(session.lastSeen)} • Expires {fmtIn(session.expiresAt)}
                     </span>
                   </span>
                   <span className="text-xs text-green-400">Active</span>
@@ -385,7 +422,27 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
             </ul>
           )}
         </Card>
-        <ComingSoon feature="Server bind & bot status" candidate="CAND-031" />
+        <Card>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h2 className="mr-auto font-bold">Bind address</h2>
+            {bind !== null &&
+              (bind.loopback ? (
+                <Badge tone="success">Loopback only</Badge>
+              ) : (
+                <Badge tone="danger">LAN exposed — do not put on the internet</Badge>
+              ))}
+          </div>
+          {bind === null ? (
+            <p className="text-sm text-neutral-400">Loading…</p>
+          ) : (
+            <p className="font-mono text-sm text-neutral-300">
+              {bind.host}:{bind.port}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-neutral-500">
+            Read-only (editing needs a restart-capable config — CAND-037). Apply out-of-band edits via the daemon reload below.
+          </p>
+        </Card>
         <Card>
           <h2 className="font-bold">Daemon reload</h2>
           <p className="mt-1 text-xs text-neutral-500">Apply out-of-band config edits by restarting the service:</p>

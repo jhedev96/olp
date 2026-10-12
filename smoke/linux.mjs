@@ -116,6 +116,26 @@ check(
   othersCleanup.revoked === sessionsA.length - 2 &&
     json('GET', '/api/auth/sessions').sessions.length === 1,
 );
+
+// server config wave 9 (remember-me pairing, identity, bind)
+const cj3 = '/tmp/olp-smoke-cj3.txt';
+const rememberHeaders = execSync(
+  `curl -s -D - -o /dev/null -c ${cj3} -X POST ${BASE}/api/login -H 'Content-Type: application/json' -d '{"username":"${U}","password":"${P}","remember":true}'`,
+  { encoding: 'utf8' },
+);
+check('remember cookie 30d', rememberHeaders.includes('Max-Age=2592000'));
+const rj = (method, path) =>
+  JSON.parse(execFileSync('curl', ['-s', '-b', cj3, '-X', method, `${BASE}${path}`], { encoding: 'utf8' }) || 'null');
+const rrows = rj('GET', '/api/auth/sessions').sessions;
+const rrow = rrows.find((s) => s.current);
+check('remember session 30d', rrow !== undefined && rrow.expiresAt - rrow.created === 30 * 86400 * 1000);
+check('identity null offline', json('GET', '/api/settings/telegram/identity').username === null);
+const bind = json('GET', '/api/settings').bind;
+check(
+  'bind loopback shape',
+  bind.host === '127.0.0.1' && bind.port === Number(new URL(BASE).port) && bind.loopback === true,
+);
+check('remember session revoked', json('POST', `/api/auth/sessions/${rrow.id}/revoke`).ok === true);
 check('store list has nginx', json('GET', '/api/install').items.some((i) => i.id === 'nginx'));
 
 // store extras wave 7 (versions, update, mirror — honest fail allowed offline, hang never)

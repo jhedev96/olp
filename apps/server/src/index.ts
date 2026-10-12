@@ -80,6 +80,8 @@ export interface ServerOptions {
   storeDns?: (host: string) => Promise<unknown>;
   settingsStore?: SettingsStore;
   telegramApi?: TelegramApi;
+  /** Bot-username thunk override for settings tests (production proxies stored-token getMe). */
+  settingsBotUsername?: () => Promise<string | null>;
   watchdogProbe?: WatchdogProbe;
   /** Kill deps override for monitor tests (production wires `process.*`). */
   monitorKill?: KillDeps;
@@ -220,6 +222,15 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
       startPoller();
     },
     testSend: (tg) => telegramApi.sendMessage(tg.botToken, tg.chatId, 'OLP notification test successful!'),
+    botUsername: opts.settingsBotUsername ?? (async () => {
+      const tg = settingsStore.load().telegram;
+      if (!tg.enabled || tg.botToken === '') return null;
+      try {
+        return await telegramApi.getMe(tg.botToken);
+      } catch {
+        return null;
+      }
+    }),
   });
   const siteWatcher = (): Array<{ id: string; name: string; port: number; running: boolean }> =>
     siteStore.list().map((site) => ({

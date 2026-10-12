@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hashPassword } from '@olp/auth';
+import { REMEMBER_TTL_MS, SESSION_TTL_MS, hashPassword } from '@olp/auth';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
 
@@ -63,6 +63,31 @@ describe('server auth routes', () => {
     });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({ error: 'Invalid username or password' });
+  });
+
+  it('pairs 30-day cookie and session on remember-me', async () => {
+    const { dataDir, legacyDir } = freshDirs();
+    seedKnown(dataDir);
+    const { app } = buildServer({ dataDir, legacyDir });
+    const login = (payload: unknown) => app.inject({ method: 'POST', url: '/api/login', payload });
+
+    const plain = await login({ username: 'tester', password: KNOWN_PASSWORD });
+    expect(String(plain.headers['set-cookie'])).toContain('Max-Age=86400');
+
+    const remembered = await login({ username: 'tester', password: KNOWN_PASSWORD, remember: true });
+    expect(String(remembered.headers['set-cookie'])).toContain('Max-Age=2592000');
+    const rememberedCookie = sessionCookie(remembered);
+
+    const quirky = await login({ username: 'tester', password: KNOWN_PASSWORD, remember: 'yes' });
+    expect(String(quirky.headers['set-cookie'])).toContain('Max-Age=86400');
+
+    const rows = (
+      await app.inject({ method: 'GET', url: '/api/auth/sessions', headers: { cookie: rememberedCookie } })
+    ).json().sessions as Array<{ id: string; current: boolean; created: number; expiresAt: number }>;
+    const mine = rows.find((r) => r.current);
+    expect((mine?.expiresAt ?? 0) - (mine?.created ?? 0)).toBe(REMEMBER_TTL_MS);
+    const plainRow = rows.find((r) => !r.current);
+    expect((plainRow?.expiresAt ?? 0) - (plainRow?.created ?? 0)).toBe(SESSION_TTL_MS);
   });
 
   it('logs in, serves identity, and logs out', async () => {
