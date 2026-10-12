@@ -13,7 +13,36 @@ export interface TelegramSettings {
 /** Server settings document (`settings.json`). */
 export interface Settings {
   telegram: TelegramSettings;
+  /** File bind override (`null` = unset; env keeps precedence — CAND-037). */
+  bind: BindFile | null;
 }
+
+/** Persisted host/port override (validated at save AND at resolve). */
+export interface BindFile {
+  host: string;
+  port: number;
+}
+
+/** Resolved listen address. */
+export interface BindConfig {
+  host: string;
+  port: number;
+}
+
+/** Bind report (shared holder: listen mutates effective/fallback). */
+export interface BindReport {
+  configured: BindConfig;
+  source: 'env' | 'file' | 'default';
+  effective: BindConfig;
+  fallback: boolean;
+}
+
+/** Privileged ports stay denied (inventory 1024+ rule). */
+const PORT_MIN = 1024;
+const PORT_MAX = 65535;
+
+/** Host format (format-only; DNS resolves at listen, failure → fallback). */
+const HOST_RE = /^[a-zA-Z0-9.:\[\]-]{1,253}$/;
 
 /** Persisted settings store (`settings.json` in production, memory in tests). */
 export interface SettingsStore {
@@ -21,9 +50,57 @@ export interface SettingsStore {
   save(settings: Settings): void;
 }
 
-/** Fresh defaults (bot off, commands allowed once enabled). */
+/** Fresh defaults (bot off, commands allowed once enabled, no bind override). */
 export function defaultSettings(): Settings {
-  return { telegram: { botToken: '', chatId: '', enabled: false, commandsEnabled: true } };
+  return { telegram: { botToken: '', chatId: '', enabled: false, commandsEnabled: true }, bind: null };
+}
+
+/** Tolerant bind parse (garbage → `null`, never throws). */
+function normalizeBind(raw: unknown): BindFile | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const checked = validateBind(obj['host'], obj['port']);
+  return checked.ok ? checked.bind : null;
+}
+
+/**
+ * Validate a host/port pair. Host is format-checked only (DNS
+ * resolves at listen — failure falls back, never refuses boot);
+ * ports under 1024 are denied (privileged + inventory 1024+ rule).
+ */
+export function validateBind(host: unknown, port: unknown): { ok: true; bind: BindConfig } | { ok: false; error: string } {
+  if (typeof host !== 'string' || !HOST_RE.test(host)) {
+    return { ok: false, error: 'Host must be 1-253 chars (letters, digits, dots, colons, dashes, brackets)' };
+  }
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
+    return { ok: false, error: `Port must be an integer ${PORT_MIN}-${PORT_MAX} (privileged ports need root)` };
+  }
+  return { ok: true, bind: { host, port } };
+}
+
+/**
+ * Resolve the listen address. Precedence (locked): valid env pair
+ * wins; else valid file; else localhost default. Invalid values fall
+ * through silently here (boot logs the warning) — never crash on a
+ * typo. Pure: env + file in, decision out (matrix-tested).
+ */
+export function resolveBind(
+  env: { PANEL_HOST?: string; PANEL_PORT?: string },
+  file: BindFile | null,
+): { bind: BindConfig; source: 'env' | 'file' | 'default' } {
+  const envPort = env.PANEL_PORT === undefined ? NaN : Number.parseInt(env.PANEL_PORT, 10);
+  if (env.PANEL_HOST !== undefined && env.PANEL_HOST !== '') {
+    const checked = validateBind(env.PANEL_HOST, Number.isNaN(envPort) ? -1 : envPort);
+    if (checked.ok) return { bind: checked.bind, source: 'env' };
+  } else if (env.PANEL_PORT !== undefined && env.PANEL_PORT !== '') {
+    const checked = validateBind('127.0.0.1', Number.isNaN(envPort) ? -1 : envPort);
+    if (checked.ok) return { bind: checked.bind, source: 'env' };
+  }
+  if (file !== null) {
+    const checked = validateBind(file.host, file.port);
+    if (checked.ok) return { bind: checked.bind, source: 'file' };
+  }
+  return { bind: { host: '127.0.0.1', port: 8080 }, source: 'default' };
 }
 
 /**
@@ -52,7 +129,7 @@ export function fileSettingsStore(dataDir: string): SettingsStore {
         const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
         if (typeof parsed !== 'object' || parsed === null) return defaultSettings();
         const obj = parsed as Record<string, unknown>;
-        return { telegram: normalizeTelegram({ telegram: obj['telegram'] }) };
+        return { telegram: normalizeTelegram({ telegram: obj['telegram'] }), bind: normalizeBind(obj['bind']) };
       } catch {
         return defaultSettings();
       }

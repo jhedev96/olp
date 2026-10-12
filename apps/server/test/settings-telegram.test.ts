@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
 import { botReply, formatUptime } from '../src/telegram.js';
+import { resolveBind, validateBind } from '../src/settings.js';
 import type { BotStatus, TelegramApi, TelegramUpdate } from '../src/telegram.js';
 import type { Settings, TelegramSettings } from '../src/settings.js';
 
@@ -407,5 +408,39 @@ describe('server telegram bot', () => {
     doneCb?.(0, null);
     await new Promise((r) => setTimeout(r, 50));
     expect(api.sent.at(-1)?.text).toBe('✅ Install Redis finished (exit 0)');
+  });
+});
+
+describe('server bind resolve and validate', () => {
+  it('validates hosts and ports with naming errors', () => {
+    expect(validateBind('127.0.0.1', 8080)).toEqual({ ok: true, bind: { host: '127.0.0.1', port: 8080 } });
+    expect(validateBind('::1', 9090)).toEqual({ ok: true, bind: { host: '::1', port: 9090 } });
+    expect(validateBind('panel.lan', 8080).ok).toBe(true);
+    expect(validateBind('', 8080)).toMatchObject({ ok: false });
+    expect(validateBind('has space', 8080).ok).toBe(false);
+    expect(validateBind('127.0.0.1; rm -rf', 8080).ok).toBe(false);
+    expect(validateBind('127.0.0.1', 80)).toMatchObject({ ok: false, error: expect.stringContaining('1024') });
+    expect(validateBind('127.0.0.1', 80.5).ok).toBe(false);
+    expect(validateBind('127.0.0.1', 99999).ok).toBe(false);
+    expect(validateBind('127.0.0.1', '8080').ok).toBe(false);
+  });
+
+  it('resolves env over file over default with fall-through', () => {
+    expect(resolveBind({}, null)).toEqual({ bind: { host: '127.0.0.1', port: 8080 }, source: 'default' });
+    expect(resolveBind({ PANEL_HOST: '0.0.0.0', PANEL_PORT: '9090' }, { host: '127.0.0.1', port: 7070 })).toEqual({
+      bind: { host: '0.0.0.0', port: 9090 },
+      source: 'env',
+    });
+    expect(resolveBind({ PANEL_PORT: '9090' }, null)).toEqual({ bind: { host: '127.0.0.1', port: 9090 }, source: 'env' });
+    expect(resolveBind({}, { host: '127.0.0.1', port: 7070 })).toEqual({
+      bind: { host: '127.0.0.1', port: 7070 },
+      source: 'file',
+    });
+    // Invalid values fall through instead of crashing boot.
+    expect(resolveBind({ PANEL_HOST: 'has space', PANEL_PORT: '80' }, { host: '127.0.0.1', port: 7070 })).toMatchObject({
+      source: 'file',
+    });
+    expect(resolveBind({ PANEL_HOST: 'has space' }, { host: 'nope nope', port: 1 })).toMatchObject({ source: 'default' });
+    expect(resolveBind({ PANEL_PORT: 'junk' }, null)).toMatchObject({ source: 'default' });
   });
 });
