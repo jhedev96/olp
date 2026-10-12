@@ -23,6 +23,7 @@
     "@olp/auth": "2.0.0-alpha.1",
     "@olp/env-core": "2.0.0-alpha.1",
     "@olp/pkgman": "2.0.0-alpha.1",
+    "@olp/services": "^2.0.0-alpha.1",
     "@olp/sysinfo": "2.0.0-alpha.1",
     "fastify": "^5.0.0",
     "mysql2": "^3.24.5",

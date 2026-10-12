@@ -25,6 +25,8 @@ import { nodeBackupSys, registerBackupRoutes } from './backup.js';
 import type { BackupSystem } from './backup.js';
 import { nodeCronBackend, registerCronRoutes } from './cron.js';
 import type { CronBackend } from './cron.js';
+import { registerServicesRoutes } from './services.js';
+import type { ServicesControllerOf } from './services.js';
 import { realSpawnShell, registerStoreRoutes } from './store.js';
 import type { SpawnShell } from './store.js';
 import { fileSettingsStore, registerSettingsRoutes } from './settings.js';
@@ -76,6 +78,8 @@ export interface ServerOptions {
   watchdogProbe?: WatchdogProbe;
   /** Kill deps override for monitor tests (production wires `process.*`). */
   monitorKill?: KillDeps;
+  /** Controller factory override for services tests. */
+  servicesControllerOf?: ServicesControllerOf;
   /** Web `dist` dir override; `null` forces API-only mode (tests). */
   webDir?: string | null;
 }
@@ -108,6 +112,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
   registerMonitorRoutes(app, { env, deps: sysDeps, root, kill: opts.monitorKill });
+  registerServicesRoutes(app, { env, deps: sysDeps, controllerOf: opts.servicesControllerOf });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
   const siteStore = opts.siteStore ?? fileSiteStore(auth.dataDir);
   const siteRuntime = createSiteRuntime();
