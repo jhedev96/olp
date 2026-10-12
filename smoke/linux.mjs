@@ -79,6 +79,34 @@ check('static outside jail rejected', evil.error === 'Access outside working dir
 check('settings get', json('GET', '/api/settings').username === U);
 check('settings save', json('POST', '/api/settings', { telegram: { enabled: false } }).ok === true);
 check('store list has nginx', json('GET', '/api/install').items.some((i) => i.id === 'nginx'));
+
+// store extras wave 7 (versions, update, mirror — honest fail allowed offline, hang never)
+const versions = json('GET', '/api/install/versions').versions;
+check(
+  'store versions shape',
+  versions !== null &&
+    typeof versions === 'object' &&
+    Object.keys(versions).length === 26 &&
+    Object.values(versions).every((v) => v === null || typeof v === 'string'),
+);
+check('store conf present', json('GET', '/api/install').items.find((i) => i.id === 'nginx').conf === '$PREFIX/etc/nginx/nginx.conf');
+check('store upgrade log empty', (() => {
+  const l = json('GET', '/api/install/upgrade/log');
+  return l.logs === '' && l.running === false && l.exitCode === null;
+})());
+check('store update started', json('POST', '/api/install/update/start', {}).ok === true);
+let updDone = false;
+for (let i = 0; i < 6; i++) {
+  execSync('sleep 5');
+  const l = json('GET', '/api/install/update/log');
+  if (!l.running) {
+    updDone = l.exitCode !== null;
+    break;
+  }
+}
+check('store update completed', updDone);
+const mirror = json('GET', '/api/install/mirror');
+check('store mirror shape', mirror.manager === 'apt' && mirror.mirror === null && mirror.latencyMs === null);
 check('proxy list empty', Array.isArray(json('GET', '/api/nginx/proxies').proxies));
 check('cron stopped here', json('GET', '/api/cron/status').running === false);
 

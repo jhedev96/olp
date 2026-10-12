@@ -11,10 +11,20 @@ afterEach(() => {
 
 const ITEMS = {
   items: [
-    { id: 'nginx', name: 'Nginx', desc: 'Web server', installed: true, installing: false },
-    { id: 'php', name: 'PHP', desc: '', installed: false, installing: false },
+    { id: 'nginx', name: 'Nginx', desc: 'Web server', conf: '$PREFIX/etc/nginx/nginx.conf', installed: true, installing: false },
+    { id: 'php', name: 'PHP', desc: '', conf: null, installed: false, installing: false },
   ],
 };
+
+const VERSIONS = { versions: { nginx: 'nginx/1.24.0', php: null } };
+const MIRROR = { manager: 'apt', mirror: null, latencyMs: null };
+
+function fullHandler(url: string): { status: number; json: unknown } {
+  if (url === '/api/install/versions') return { status: 200, json: VERSIONS };
+  if (url === '/api/install/mirror') return { status: 200, json: MIRROR };
+  if (url === '/api/stats') return { status: 200, json: {} };
+  return { status: 200, json: ITEMS };
+}
 
 function stubApi(handler: (url: string, method: string) => { status: number; json: unknown }): { calls: string[] } {
   const calls: string[] = [];
@@ -37,6 +47,75 @@ describe('web store page', () => {
     expect(screen.getByText('Reinstall')).not.toBeNull();
     expect(screen.getByText('Not installed')).not.toBeNull();
     expect(screen.getByText('Install')).not.toBeNull();
+  });
+
+  it('shows versions, conf and the mirror card', async () => {
+    stubApi((url) => fullHandler(url));
+    await act(async () => {
+      render(<StorePage />);
+    });
+    expect(screen.getByText('nginx/1.24.0')).not.toBeNull();
+    expect(screen.getByText('Conf: $PREFIX/etc/nginx/nginx.conf')).not.toBeNull();
+    expect(screen.getByText('Configure')).not.toBeNull();
+    expect(screen.queryByText('CAND-027')).toBeNull();
+    expect(screen.getByText('Mirror & latency')).not.toBeNull();
+    expect(screen.getByText('APT')).not.toBeNull();
+  });
+
+  it('runs repo update in the shared log modal', async () => {
+    vi.useFakeTimers();
+    try {
+      let polls = 0;
+      stubApi((url) => {
+        if (url === '/api/install/update/start') return { status: 200, json: { ok: true } };
+        if (url === '/api/install/update/log') {
+          polls++;
+          return polls < 2
+            ? { status: 200, json: { logs: 'Hit:1ports\n', running: true, exitCode: null } }
+            : { status: 200, json: { logs: 'Hit:1ports\nDone\n', running: false, exitCode: 0 } };
+        }
+        return fullHandler(url);
+      });
+      await act(async () => {
+        render(<StorePage />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Update repo'));
+      });
+      expect(screen.getByText('Repo update')).not.toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.getByText(/Done/)).not.toBeNull();
+      expect(screen.getByText(/done \(exit 0\)/)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('navigates Configure to files with the conf path', async () => {
+    stubApi((url) => fullHandler(url));
+    await act(async () => {
+      render(<StorePage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Configure'));
+    });
+    expect(window.location.pathname).toBe('/files');
+    expect(window.location.search).toContain('path=');
+    expect(decodeURIComponent(window.location.search)).toContain('$PREFIX/etc/nginx/nginx.conf');
+    window.history.pushState({}, '', '/store');
+  });
+
+  it('filters to installed only', async () => {
+    stubApi((url) => fullHandler(url));
+    await act(async () => {
+      render(<StorePage />);
+    });
+    expect(screen.getByText('PHP')).not.toBeNull();
+    fireEvent.click(screen.getByLabelText('Installed only'));
+    expect(screen.queryByText('PHP')).toBeNull();
+    expect(screen.getByText('Nginx')).not.toBeNull();
   });
 
   it('streams install logs and refreshes on finish', async () => {
@@ -90,9 +169,9 @@ describe('web store page', () => {
       render(<StorePage />);
     });
     expect(screen.getByText('1 installed / 2 total')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Update repo' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Batch upgrade' })).toHaveProperty('disabled', true);
-    expect(screen.getByText('CAND-027')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Update repo' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Batch upgrade' })).toHaveProperty('disabled', false);
+    expect(screen.queryByText('CAND-027')).toBeNull();
     fireEvent.change(screen.getByLabelText('Search packages'), { target: { value: 'ngin' } });
     expect(screen.queryByText('PHP')).toBeNull();
     expect(screen.getByText('Nginx')).not.toBeNull();

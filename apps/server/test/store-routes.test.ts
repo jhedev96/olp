@@ -7,6 +7,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
+import { parseMirrorHost } from '../src/store.js';
 
 const KNOWN_PASSWORD = 'storepass1';
 
@@ -228,5 +229,179 @@ describe('server store routes', () => {
     expect(text).not.toContain('$ pkg install -y zip');
     expect(text).toContain('line509');
     expect(text.split('\n').length).toBeLessThanOrEqual(502);
+  });
+
+  it('lists conf paths alongside flags', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawn } = makeSpawn();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: makeEnv('termux'),
+      sysDeps: quietDeps(),
+      root,
+      storeCheck: () => Promise.resolve(false),
+      storeSpawn: spawn,
+    });
+    const cookie = await authedCookie(app);
+    const res = await app.inject({ method: 'GET', url: '/api/install', headers: { cookie } });
+    const byId = new Map(
+      (res.json().items as Array<{ id: string; conf: string | null }>).map((i) => [i.id, i.conf]),
+    );
+    expect(byId.get('nginx')).toBe('$PREFIX/etc/nginx/nginx.conf');
+    expect(byId.get('git')).toBe('~/.gitconfig');
+    expect(byId.get('redis')).toBeNull();
+  });
+
+  it('serves versions with installed-gating and honest nulls', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawn } = makeSpawn();
+    const execCalls: string[] = [];
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: makeEnv('termux'),
+      sysDeps: quietDeps(),
+      root,
+      storeCheck: (cmd) => Promise.resolve(cmd.includes('nginx')),
+      storeExec: (cmd) => {
+        execCalls.push(cmd);
+        if (cmd.startsWith('nginx')) return Promise.resolve('nginx version: openresty/1.21.4.1\nbuilt by gcc\n');
+        return Promise.reject(new Error('no node here'));
+      },
+      storeSpawn: spawn,
+    });
+    const cookie = await authedCookie(app);
+    const res = await app.inject({ method: 'GET', url: '/api/install/versions', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+    const versions = res.json().versions as Record<string, string | null>;
+    expect(versions['nginx']).toBe('nginx version: openresty/1.21.4.1');
+    expect(versions['php']).toBeNull(); // uninstalled: no version spawn at all
+    expect(versions['nodejs']).toBeNull(); // forced-installed but the probe failed
+    expect(execCalls.some((c) => c.includes('php'))).toBe(false);
+    expect(execCalls.some((c) => c.startsWith('nginx'))).toBe(true);
+    expect((await app.inject({ method: 'GET', url: '/api/install/versions' })).statusCode).toBe(401);
+  });
+
+  it('runs update and upgrade with busy and unavailable guards', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawn, runs } = makeSpawn();
+    const noted: string[] = [];
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: makeEnv('termux'),
+      sysDeps: quietDeps(),
+      root,
+      storeCheck: () => Promise.resolve(false),
+      storeSpawn: spawn,
+      storeNotify: (text) => {
+        noted.push(text);
+      },
+    });
+    const cookie = await authedCookie(app);
+    expect((await app.inject({ method: 'GET', url: '/api/install/upgrade/log', headers: { cookie } })).json()).toEqual({
+      logs: '',
+      running: false,
+      exitCode: null,
+    });
+    expect((await app.inject({ method: 'POST', url: '/api/install/update/start', headers: { cookie } })).json()).toEqual({
+      ok: true,
+    });
+    expect(runs[0]?.cmd).toBe('pkg update');
+    const busy = await app.inject({ method: 'POST', url: '/api/install/update/start', headers: { cookie } });
+    expect(busy.statusCode).toBe(400);
+    expect(busy.json()).toEqual({ error: 'Repo update already running' });
+    runs[0]?.done(0);
+    expect((await app.inject({ method: 'GET', url: '/api/install/update/log', headers: { cookie } })).json()).toMatchObject({
+      running: false,
+      exitCode: 0,
+    });
+    expect(noted).toEqual(['✅ Repo update finished (exit 0)']);
+
+    expect((await app.inject({ method: 'POST', url: '/api/install/upgrade/start', headers: { cookie } })).statusCode).toBe(200);
+    expect(runs[1]?.cmd).toBe('pkg upgrade -y');
+    runs[1]?.done(1);
+    expect(noted[1]).toBe('❌ Batch upgrade finished (exit 1)');
+    expect((await app.inject({ method: 'POST', url: '/api/install/update/start' })).statusCode).toBe(401);
+  });
+
+  it('answers unavailable manager ops and keeps static routes off the parametric id', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawn } = makeSpawn();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: makeEnv('windows'),
+      sysDeps: quietDeps(),
+      root,
+      storeCheck: () => Promise.resolve(false),
+      storeSpawn: spawn,
+    });
+    const cookie = await authedCookie(app);
+    // Static routes win: these are manager ops, never 'Unknown package'.
+    expect((await app.inject({ method: 'POST', url: '/api/install/update/start', headers: { cookie } })).json().error).toBe(
+      'Repo update unavailable for windows',
+    );
+    expect((await app.inject({ method: 'POST', url: '/api/install/upgrade/start', headers: { cookie } })).json().error).toBe(
+      'Batch upgrade unavailable for windows',
+    );
+    expect((await app.inject({ method: 'GET', url: '/api/install/versions', headers: { cookie } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie } })).json()).toEqual({
+      manager: null,
+      mirror: null,
+      latencyMs: null,
+    });
+  });
+
+  it('parses mirror hosts and times termux latency honestly', () => {
+    expect(parseMirrorHost('deb https://packages.termux.dev/apt/termux-main/ stable main\n')).toBe('packages.termux.dev');
+    expect(parseMirrorHost('# comment\ndeb not-a-url stable main\n')).toBeNull();
+    expect(parseMirrorHost('just some text\n')).toBeNull();
+    expect(parseMirrorHost('deb https://exa mple.com/ stable main\n')).toBeNull();
+  });
+
+  it('serves termux mirror with dns success, failure, and non-termux nulls', async () => {
+    const sources = 'deb https://packages.termux.dev/apt/termux-main/ stable main\n';
+    const buildMirror = (dns: (host: string) => Promise<unknown>, env: EnvId, manager: 'pkg' | 'apt' = 'pkg') => {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+      const { spawn } = makeSpawn();
+      return buildServer({
+        dataDir,
+        legacyDir,
+        env: { ...makeEnv(env), pkgman: manager === 'pkg' ? 'pkg' : 'apt' },
+        sysDeps: quietDeps(),
+        root,
+        storeCheck: () => Promise.resolve(false),
+        storeSpawn: spawn,
+        storeManager: manager,
+        storePrefix: '/p',
+        storeReadSource: (path) => (path === '/p/etc/apt/sources.list' ? sources : null),
+        storeDns: dns,
+      });
+    };
+    const { app } = buildMirror(() => Promise.resolve({ address: '1.2.3.4' }), 'termux');
+    const cookie = await authedCookie(app);
+    const ok = await app.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie } });
+    expect(ok.json().manager).toBe('pkg');
+    expect(ok.json().mirror).toBe('packages.termux.dev');
+    expect(typeof ok.json().latencyMs).toBe('number');
+
+    const { app: app2 } = buildMirror(() => Promise.reject(new Error('EAI_AGAIN')), 'termux');
+    const cookie2 = await authedCookie(app2);
+    expect((await app2.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie: cookie2 } })).json()).toMatchObject({
+      manager: 'pkg',
+      mirror: 'packages.termux.dev',
+      latencyMs: null,
+    });
+
+    const { app: app3 } = buildMirror(() => Promise.resolve({}), 'debian', 'apt');
+    const cookie3 = await authedCookie(app3);
+    expect((await app3.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie: cookie3 } })).json()).toEqual({
+      manager: 'apt',
+      mirror: null,
+      latencyMs: null,
+    });
+    expect((await app3.inject({ method: 'GET', url: '/api/install/mirror' })).statusCode).toBe(401);
   });
 });

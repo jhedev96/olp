@@ -4,4 +4,4 @@
  */
 
 export type { CatalogItem } from './catalog.js';
-export { CATALOG, checkCommand, installCommand, isForced, itemById } from './catalog.js';
+export { CATALOG, checkCommand, installCommand, isForced, itemById, updateCommand, upgradeCommand, versionCommand } from './catalog.js';

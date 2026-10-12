@@ -46,11 +46,13 @@ export function slugFromPath(path: string): Slug {
 }
 
 /**
- * Push a slug onto history. Rendering stays with the caller (same as
- * Terwo `showTab`, which pushes and paints in one step).
+ * Push a slug onto history, with an optional raw query string
+ * (e.g. `path=...` for the Files deep-link). Rendering stays with
+ * the caller (same as Terwo `showTab`, which pushes and paints in
+ * one step).
  */
-export function navigate(slug: Slug, history: HistoryLike = window.history): void {
-  history.pushState({ slug }, '', `/${slug}`);
+export function navigate(slug: Slug, query?: string, history: HistoryLike = window.history): void {
+  history.pushState({ slug }, '', query === undefined || query === '' ? `/${slug}` : `/${slug}?${query}`);
 }
 
 /**
@@ -58,7 +60,7 @@ export function navigate(slug: Slug, history: HistoryLike = window.history): voi
  * listener in `main.tsx` (no reload — the server fallback would also
  * resolve the slug on a hard load, this just skips the round trip).
  */
-export function navigateTo(slug: Slug): void {
-  navigate(slug);
+export function navigateTo(slug: Slug, query?: string): void {
+  navigate(slug, query);
   window.dispatchEvent(new Event('popstate'));
 }

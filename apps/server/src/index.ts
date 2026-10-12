@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { detect } from '@olp/env-core';
-import type { Environment } from '@olp/env-core';
+import type { Environment, PkgManId } from '@olp/env-core';
 import type { SysDeps } from '@olp/sysinfo';
 import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
@@ -71,8 +71,13 @@ export interface ServerOptions {
   backupDbConfig?: (engine: 'mysql' | 'postgres') => DbConfig;
   cronBackend?: CronBackend;
   storeCheck?: (cmd: string) => Promise<boolean>;
+  storeExec?: (cmd: string) => Promise<string>;
   storeSpawn?: SpawnShell;
   storeNotify?: (text: string) => void;
+  storePrefix?: string;
+  storeManager?: PkgManId;
+  storeReadSource?: (path: string) => string | null;
+  storeDns?: (host: string) => Promise<unknown>;
   settingsStore?: SettingsStore;
   telegramApi?: TelegramApi;
   watchdogProbe?: WatchdogProbe;
@@ -230,9 +235,14 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   });
   registerStoreRoutes(app, {
     env: env.id,
+    manager: opts.storeManager ?? env.pkgman,
     home: homedir(),
+    prefix: opts.storePrefix,
     check: opts.storeCheck,
+    exec: opts.storeExec,
     spawnShell: opts.storeSpawn ?? realSpawnShell,
+    readSourceFile: opts.storeReadSource,
+    dnsLookup: opts.storeDns,
     notify: opts.storeNotify ?? notifyTelegram,
   });
   const terminal = new TerminalManager({
