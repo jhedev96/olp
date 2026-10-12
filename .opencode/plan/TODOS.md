@@ -196,3 +196,4 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [ ] W12-04 smoke extension + live ALL GREEN (+ authenticator human gate)
 - [ ] W12-05 frontend wiring
 - [ ] W12-06 docs + CAND-032 close
+- [ ] HUMAN GATE: real-authenticator ceremony proof (register + login with a security key / platform biometric on a human machine; record PASS/FAIL here)
