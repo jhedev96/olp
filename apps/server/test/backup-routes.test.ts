@@ -419,4 +419,65 @@ describe('server backup routes', () => {
     const data2 = Buffer.from('UPLOADDATA').toString('base64');
     expect((await app.inject({ method: 'POST', url: '/api/backups/upload', payload: { type: 'folder', name: 'up2', data: data2 } })).statusCode).toBe(401);
   });
+
+  it('manages schedules with validation and toggle', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    const post = (payload: unknown) => app.inject({ method: 'POST', url: '/api/backups/schedules', headers: { cookie }, payload });
+    expect((await post({ type: 'dvd', schedule: '* * * * *', source: 'x' })).json().error).toBe('Invalid type');
+    expect((await post({ type: 'folder', schedule: 'nonsense', source: 'x' })).json().error).toBe('Invalid schedule (5 cron fields required)');
+    expect((await post({ type: 'folder', schedule: '* * * * *', source: '' })).json().error).toBe('Source is required');
+    const created = await post({ type: 'folder', name: 'night', schedule: '* * * * *', source: 'proj' });
+    expect(created.json().ok).toBe(true);
+    const sid = (created.json().schedule as { id: string }).id;
+    const list = await app.inject({ method: 'GET', url: '/api/backups/schedules', headers: { cookie } });
+    expect(list.json().schedules).toMatchObject([{ name: 'night', enabled: true, lastRun: null }]);
+    expect(typeof list.json().schedules[0].nextRun).toBe('number');
+    const toggled = await app.inject({ method: 'POST', url: `/api/backups/schedules/${sid}/toggle`, headers: { cookie } });
+    expect(toggled.json()).toEqual({ ok: true });
+    const unknown = await app.inject({ method: 'POST', url: '/api/backups/schedules/zz/toggle', headers: { cookie } });
+    expect(unknown.statusCode).toBe(404);
+    const deleted = await app.inject({ method: 'DELETE', url: `/api/backups/schedules/${sid}`, headers: { cookie } });
+    expect(deleted.json()).toEqual({ ok: true });
+    expect((await app.inject({ method: 'GET', url: '/api/backups/schedules' })).statusCode).toBe(401);
+  });
+
+  it('ticks due schedules and records failures', async () => {
+    const { dueSchedules, readSchedules, runDueBackups } = await import('../src/backup.js');
+    const { dataDir, root } = freshWorkspace();
+    const sys = memorySys();
+    sys.dirs.add(join(root, 'proj'));
+    const deps = { sys, dataDir, root, dbConfig: dbConfig('pw'), now: () => 1728470400000 };
+    expect(dueSchedules([], 1728470400000)).toEqual([]);
+    expect(
+      dueSchedules(
+        [{ id: 'a', name: 'n', type: 'folder', source: 'proj', schedule: '* * * * *', enabled: false, created: 0, lastRun: null, lastStatus: null }],
+        1728470400000,
+      ),
+    ).toEqual([]);
+    sys.writeFile(
+      join(backupsOf(sys, dataDir), 'backup-schedules.json'),
+      JSON.stringify([
+        { id: 's1', name: 'night', type: 'folder', source: 'proj', schedule: '* * * * *', enabled: true, created: 0, lastRun: null, lastStatus: null },
+      ]),
+      { mode: 0o600 },
+    );
+    await runDueBackups(deps, 1728470400000);
+    const after = readSchedules(sys, dataDir);
+    expect(after).toMatchObject([{ id: 's1', lastRun: 1728470400000, lastStatus: 'ok' }]);
+    const w2 = freshWorkspace();
+    const missing = memorySys({ zip: false });
+    missing.dirs.add(join(w2.root, 'proj'));
+    missing.writeFile(
+      join(backupsOf(missing, w2.dataDir), 'backup-schedules.json'),
+      JSON.stringify([
+        { id: 's1', name: 'night', type: 'folder', source: 'proj', schedule: '* * * * *', enabled: true, created: 0, lastRun: null, lastStatus: null },
+      ]),
+      { mode: 0o600 },
+    );
+    await runDueBackups({ sys: missing, dataDir: w2.dataDir, root: w2.root, dbConfig: dbConfig('pw'), now: () => 1728470400000 });
+    expect(readSchedules(missing, w2.dataDir)[0]).toMatchObject({ id: 's1', lastStatus: expect.stringContaining('zip') });
+  });
 });

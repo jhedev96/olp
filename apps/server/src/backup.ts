@@ -1,9 +1,10 @@
 import { createReadStream, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
 import { relOf, safePath } from './files.js';
+import { nextRunMs, parseCronSchedule } from './cron-schedule.js';
 import type { DbConfig } from './database.js';
 
 /** Backup kinds: folder archives plus per-engine SQL dumps. */
@@ -207,6 +208,189 @@ function pgCommand(cfg: DbConfig, tool: 'pg_dump' | 'psql', db: string, file: st
   return file === null ? `${env}${base}` : `${env}${base} ${direction} ${quote(file)}`;
 }
 
+/** Inputs for {@link createArchive} (shared by the route and the ticker). */
+export interface ArchiveInput {
+  type: BackupType;
+  name: string;
+  source: string;
+  gzip: boolean;
+}
+
+/**
+ * Create one archive end to end (validate → engine → sidecar+hash).
+ * Errors carry the same messages as the manual route (single source
+ * of truth for both paths).
+ */
+export async function createArchive(
+  sys: BackupSystem,
+  dataDir: string,
+  root: string,
+  dbConfig: (engine: 'mysql' | 'postgres') => DbConfig,
+  now: () => number,
+  input: ArchiveInput,
+): Promise<{ name: string; file: string }> {
+  const dir = backupsDir(dataDir);
+  const name = sanitizeBackupName(input.name, () => `backup-${backupStamp()}`);
+  sys.mkdirp(dir);
+  if (readMeta(sys, dataDir, name) !== null) throw new Error('Backup name already taken');
+  let file: string;
+  let source: string;
+  if (input.type === 'folder') {
+    const src = safePath(root, input.source);
+    if (sys.statFile(src) === null) throw new Error('Source not found');
+    await mustBin(sys, 'zip', 'Package "zip" is not installed — install it first via the Store menu');
+    file = `${name}.zip`;
+    source = relOf(root, src);
+    await sys.exec(`zip -rq ${quote(join(dir, file))} .`, ARCHIVE_TIMEOUT_MS, { cwd: src });
+  } else {
+    const dbName = input.source.trim();
+    if (dbName === '') throw new Error('Database name is required');
+    const cfg = dbConfig(input.type);
+    source = dbName;
+    file = input.gzip ? `${name}.sql.gz` : `${name}.sql`;
+    const dest = join(dir, file);
+    if (input.type === 'mysql') {
+      await mustBin(sys, 'mysqldump', 'mysqldump not found. Install mysql via the Store menu.');
+      if (input.gzip) {
+        await mustBin(sys, 'gzip', 'gzip not found.');
+        await sys.exec(`${mysqlCommand(cfg, 'mysqldump', dbName, null, '>')} | gzip > ${quote(dest)}`, ARCHIVE_TIMEOUT_MS);
+      } else {
+        await sys.exec(mysqlCommand(cfg, 'mysqldump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
+      }
+    } else {
+      await mustBin(sys, 'pg_dump', 'pg_dump not found. Install postgres via the Store menu.');
+      if (input.gzip) {
+        await mustBin(sys, 'gzip', 'gzip not found.');
+        await sys.exec(`${pgCommand(cfg, 'pg_dump', dbName, null, '>')} | gzip > ${quote(dest)}`, ARCHIVE_TIMEOUT_MS);
+      } else {
+        await sys.exec(pgCommand(cfg, 'pg_dump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
+      }
+    }
+  }
+  sys.writeFile(
+    metaPath(dataDir, name),
+    JSON.stringify({ name, file, type: input.type, source, created: now(), sha256: await hashStream(sys.streamFile(join(dir, file))) }, null, 2),
+    { mode: 0o600 },
+  );
+  return { name, file };
+}
+
+/** One backup schedule (ticker-managed). */
+export interface BackupSchedule {
+  id: string;
+  name: string;
+  type: BackupType;
+  source: string;
+  schedule: string;
+  enabled: boolean;
+  created: number;
+  lastRun: number | null;
+  lastStatus: string | null;
+}
+
+/** Ticker cadence (documented; schedules resolve to the minute). */
+export const SCHEDULE_TICK_MS = 60000;
+
+function schedulesPath(dataDir: string): string {
+  return join(backupsDir(dataDir), 'backup-schedules.json');
+}
+
+function validScheduleRow(row: unknown): row is BackupSchedule {
+  if (typeof row !== 'object' || row === null) return false;
+  const r = row as Record<string, unknown>;
+  return (
+    typeof r['id'] === 'string' &&
+    typeof r['name'] === 'string' &&
+    (r['type'] === 'folder' || r['type'] === 'mysql' || r['type'] === 'postgres') &&
+    typeof r['source'] === 'string' &&
+    typeof r['schedule'] === 'string' &&
+    typeof r['enabled'] === 'boolean' &&
+    typeof r['created'] === 'number'
+  );
+}
+
+/** Read schedules (corrupt/missing → [], never throws). */
+export function readSchedules(sys: BackupSystem, dataDir: string): BackupSchedule[] {
+  try {
+    const parsed: unknown = JSON.parse(sys.readFile(schedulesPath(dataDir)) ?? 'null');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(validScheduleRow).map((r) => ({
+      ...r,
+      lastRun: typeof r.lastRun === 'number' ? r.lastRun : null,
+      lastStatus: typeof r.lastStatus === 'string' ? r.lastStatus : null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function writeSchedules(sys: BackupSystem, dataDir: string, list: BackupSchedule[]): void {
+  sys.mkdirp(backupsDir(dataDir));
+  sys.writeFile(schedulesPath(dataDir), JSON.stringify(list, null, 2), { mode: 0o600 });
+}
+
+/** Schedules due at `nowMs` (enabled + a firing minute reached). */
+export function dueSchedules(schedules: BackupSchedule[], nowMs: number): BackupSchedule[] {
+  return schedules.filter((s) => {
+    if (!s.enabled) return false;
+    const next = nextRunMs(s.schedule, s.lastRun ?? 0);
+    return next !== null && next <= nowMs;
+  });
+}
+
+/** Tick inputs (shared by the interval and tests). */
+export interface TickDeps {
+  sys: BackupSystem;
+  dataDir: string;
+  root: string;
+  dbConfig: (engine: 'mysql' | 'postgres') => DbConfig;
+  now: () => number;
+}
+
+/**
+ * Run one scheduler tick: execute due schedules inline (auto names),
+ * record lastRun/lastStatus per schedule (errors capped, never thrown
+ * out — one failing schedule must not stall the rest).
+ */
+export async function runDueBackups(deps: TickDeps, nowMs: number = deps.now()): Promise<void> {
+  const list = readSchedules(deps.sys, deps.dataDir);
+  let changed = false;
+  for (const sched of dueSchedules(list, nowMs)) {
+    changed = true;
+    try {
+      await createArchive(deps.sys, deps.dataDir, deps.root, deps.dbConfig, deps.now, {
+        type: sched.type,
+        name: `${sched.name}-${backupStamp(new Date(nowMs))}`,
+        source: sched.source,
+        gzip: sched.type !== 'folder',
+      });
+      sched.lastRun = nowMs;
+      sched.lastStatus = 'ok';
+    } catch (err) {
+      sched.lastRun = nowMs;
+      const message = err instanceof Error ? err.message : String(err);
+      sched.lastStatus = message === '' ? 'failed' : message.slice(0, 200);
+    }
+  }
+  if (changed) writeSchedules(deps.sys, deps.dataDir, list);
+}
+
+/**
+ * Start the 60 s scheduler tick (production; tests drive
+ * `runDueBackups` directly). Returns a stopper. The timer is unrefed
+ * so it never holds the process open on its own.
+ */
+export function startBackupScheduler(deps: TickDeps, intervalMs: number = SCHEDULE_TICK_MS): () => void {
+  const timer = setInterval(() => {
+    void runDueBackups(deps).catch(() => {
+      // per-schedule errors are already recorded; nothing escapes
+    });
+  }, intervalMs);
+  if (typeof (timer as unknown as { unref?: unknown }).unref === 'function') {
+    (timer as unknown as { unref(): void }).unref();
+  }
+  return () => clearInterval(timer);
+}
 /**
  * Register backup endpoints (all behind the session gate).
  * Thrown errors propagate to the app error handler (400 `{error}`).
@@ -234,51 +418,13 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
   app.post('/api/backups', { bodyLimit: 1024 * 1024 }, async (req) => {
     const body = ((req.body ?? {}) as Record<string, unknown>);
     if (!isBackupType(body['type'])) throw new Error('Invalid type');
-    const type = body['type'];
-    const name = sanitizeBackupName(body['name'], () => `backup-${backupStamp()}`);
-    sys.mkdirp(dir);
-    if (readMeta(sys, opts.dataDir, name) !== null) throw new Error('Backup name already taken');
-    let file: string;
-    let source: string;
-    if (type === 'folder') {
-      const src = safePath(opts.root, strField(body, 'source'));
-      if (sys.statFile(src) === null) throw new Error('Source not found');
-      await mustBin(sys, 'zip', 'Package "zip" is not installed — install it first via the Store menu');
-      file = `${name}.zip`;
-      source = relOf(opts.root, src);
-      await sys.exec(`zip -rq ${quote(join(dir, file))} .`, ARCHIVE_TIMEOUT_MS, { cwd: src });
-    } else {
-      const dbName = strField(body, 'source').trim();
-      if (dbName === '') throw new Error('Database name is required');
-      const cfg = opts.dbConfig(type);
-      source = dbName;
-      const gzip = body['gzip'] === true;
-      file = gzip ? `${name}.sql.gz` : `${name}.sql`;
-      const dest = join(dir, file);
-      if (type === 'mysql') {
-        await mustBin(sys, 'mysqldump', 'mysqldump not found. Install mysql via the Store menu.');
-        if (gzip) {
-          await mustBin(sys, 'gzip', 'gzip not found.');
-          await sys.exec(`${mysqlCommand(cfg, 'mysqldump', dbName, null, '>')} | gzip > ${quote(dest)}`, ARCHIVE_TIMEOUT_MS);
-        } else {
-          await sys.exec(mysqlCommand(cfg, 'mysqldump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
-        }
-      } else {
-        await mustBin(sys, 'pg_dump', 'pg_dump not found. Install postgres via the Store menu.');
-        if (gzip) {
-          await mustBin(sys, 'gzip', 'gzip not found.');
-          await sys.exec(`${pgCommand(cfg, 'pg_dump', dbName, null, '>')} | gzip > ${quote(dest)}`, ARCHIVE_TIMEOUT_MS);
-        } else {
-          await sys.exec(pgCommand(cfg, 'pg_dump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
-        }
-      }
-    }
-    sys.writeFile(
-      metaPath(opts.dataDir, name),
-      JSON.stringify({ name, file, type, source, created: now(), sha256: await hashStream(sys.streamFile(join(dir, file))) }, null, 2),
-      { mode: 0o600 },
-    );
-    return { ok: true, name };
+    const created = await createArchive(sys, opts.dataDir, opts.root, opts.dbConfig, now, {
+      type: body['type'],
+      name: typeof body['name'] === 'string' ? body['name'] : '',
+      source: strField(body, 'source'),
+      gzip: body['gzip'] === true,
+    });
+    return { ok: true, name: created.name };
   });
 
   app.get('/api/backups/:name/verify', async (req) => {
@@ -313,6 +459,67 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
       { mode: 0o600 },
     );
     return { ok: true, name };
+  });
+
+  app.get('/api/backups/schedules', async () => {
+    return {
+      schedules: readSchedules(sys, opts.dataDir).map((s) => ({ ...s, nextRun: nextRunMs(s.schedule, s.lastRun ?? 0) ?? null })),
+    };
+  });
+
+  app.post('/api/backups/schedules', { bodyLimit: 1024 * 1024 }, async (req) => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    const type = body['type'];
+    if (!isBackupType(type)) throw new Error('Invalid type');
+    const schedule = typeof body['schedule'] === 'string' ? body['schedule'].trim() : '';
+    if (parseCronSchedule(schedule) === null) throw new Error('Invalid schedule (5 cron fields required)');
+    const source = strField(body, 'source').trim();
+    if (source === '') throw new Error('Source is required');
+    const list = readSchedules(sys, opts.dataDir);
+    const row: BackupSchedule = {
+      id: randomBytes(4).toString('hex'),
+      name: sanitizeBackupName(body['name'], () => `${type}-scheduled`),
+      type,
+      source,
+      schedule,
+      enabled: body['enabled'] !== false,
+      created: now(),
+      lastRun: null,
+      lastStatus: null,
+    };
+    list.push(row);
+    writeSchedules(sys, opts.dataDir, list);
+    return { ok: true, schedule: row };
+  });
+
+  app.delete('/api/backups/schedules/:id', async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const list = readSchedules(sys, opts.dataDir);
+    if (!list.some((s) => s.id === id)) {
+      reply.code(404);
+      return { error: 'Unknown schedule' };
+    }
+    writeSchedules(
+      sys,
+      opts.dataDir,
+      list.filter((s) => s.id !== id),
+    );
+    return { ok: true };
+  });
+
+  app.post('/api/backups/schedules/:id/toggle', async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const list = readSchedules(sys, opts.dataDir);
+    const row = list.find((s) => s.id === id);
+    if (row === undefined) {
+      reply.code(404);
+      return { error: 'Unknown schedule' };
+    }
+    row.enabled = !row.enabled;
+    writeSchedules(sys, opts.dataDir, list);
+    return { ok: true };
   });
 
   app.get('/api/backups/:name/download', async (req, reply) => {
