@@ -52,6 +52,12 @@ Termux/Alpine/macOS hardware.
   unknown, self clears cookie) + `POST others/revoke`; login captures
   UA/IP, touch refreshes per request; settings card wired (THIS
   DEVICE, dialogs, fmtAgo). Smoke 62/62 on Linux.
+- Server config wave 9: login `remember` (30d cookie + session
+  paired), `GET /api/settings/telegram/identity` (stored-token getMe,
+  silent null), `GET /api/settings` gains `bind` (read-only,
+  loopback badge); login + settings wired (checkbox, verified badge,
+  bind card, row expiry via fmtIn); PBKDF2 310k/rehash dropped with
+  rationale; editable bind splits to CAND-037. Smoke 67/67 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
