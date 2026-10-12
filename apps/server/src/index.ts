@@ -9,6 +9,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
 import { nodeDeps, registerStatsRoutes } from './stats.js';
+import { registerMonitorRoutes } from './monitor.js';
 import { registerFilesRoutes } from './files.js';
 import { TerminalManager, realBackendFactory, registerTerminalRoutes } from './terminal.js';
 import type { TermBackendFactory } from './terminal.js';
@@ -103,6 +104,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   migrateLegacy(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
+  registerMonitorRoutes(app, { env, deps: sysDeps, root });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
   const siteStore = opts.siteStore ?? fileSiteStore(auth.dataDir);
   const siteRuntime = createSiteRuntime();
