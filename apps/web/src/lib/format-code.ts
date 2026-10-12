@@ -24,9 +24,24 @@ async function typescriptPlugins(): Promise<Plugin[]> {
   return [typescript as unknown as Plugin, estree as unknown as Plugin];
 }
 
-async function singlePlugin(path: 'postcss' | 'html' | 'markdown' | 'yaml'): Promise<Plugin[]> {
-  const plugin = await import(`prettier/plugins/${path}`);
-  return [plugin as unknown as Plugin];
+async function postcssPlugins(): Promise<Plugin[]> {
+  const postcss = await import('prettier/plugins/postcss');
+  return [postcss as unknown as Plugin];
+}
+
+async function htmlPlugins(): Promise<Plugin[]> {
+  const html = await import('prettier/plugins/html');
+  return [html as unknown as Plugin];
+}
+
+async function markdownPlugins(): Promise<Plugin[]> {
+  const markdown = await import('prettier/plugins/markdown');
+  return [markdown as unknown as Plugin];
+}
+
+async function yamlPlugins(): Promise<Plugin[]> {
+  const yaml = await import('prettier/plugins/yaml');
+  return [yaml as unknown as Plugin];
 }
 
 /** Extension → parser + lazy plugins (Prettier core set; else `null`). */
@@ -38,14 +53,14 @@ const TABLE = new Map<string, { parser: FormatPlan['parser']; load: Loader }>([
   ['ts', { parser: 'typescript', load: typescriptPlugins }],
   ['tsx', { parser: 'typescript', load: typescriptPlugins }],
   ['json', { parser: 'json', load: babelPlugins }],
-  ['css', { parser: 'css', load: () => singlePlugin('postcss') }],
-  ['html', { parser: 'html', load: () => singlePlugin('html') }],
-  ['htm', { parser: 'html', load: () => singlePlugin('html') }],
-  ['xml', { parser: 'html', load: () => singlePlugin('html') }],
-  ['svg', { parser: 'html', load: () => singlePlugin('html') }],
-  ['md', { parser: 'markdown', load: () => singlePlugin('markdown') }],
-  ['yml', { parser: 'yaml', load: () => singlePlugin('yaml') }],
-  ['yaml', { parser: 'yaml', load: () => singlePlugin('yaml') }],
+  ['css', { parser: 'css', load: postcssPlugins }],
+  ['html', { parser: 'html', load: htmlPlugins }],
+  ['htm', { parser: 'html', load: htmlPlugins }],
+  ['xml', { parser: 'html', load: htmlPlugins }],
+  ['svg', { parser: 'html', load: htmlPlugins }],
+  ['md', { parser: 'markdown', load: markdownPlugins }],
+  ['yml', { parser: 'yaml', load: yamlPlugins }],
+  ['yaml', { parser: 'yaml', load: yamlPlugins }],
 ]);
 
 function extOf(name: string): string {

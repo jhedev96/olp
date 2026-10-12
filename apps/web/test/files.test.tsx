@@ -44,6 +44,30 @@ function filesHandler(url: string, body: unknown): { status: number; json: unkno
   return { status: 200, json: { ok: true } };
 }
 
+/** Single messy-JS-file workspace (prettify/diff tests). */
+function jsHandler(url: string, body: unknown): { status: number; json: unknown } {
+  if (url.startsWith('/api/files?path=')) {
+    return { status: 200, json: { path: '', entries: [{ name: 'm.js', type: 'file', size: 9, mtime: 0 }] } };
+  }
+  if (url === '/api/read') {
+    const name = (body as { name?: unknown }).name;
+    if (name === 'm.js') return { status: 200, json: { ok: true, content: 'const x=1' } };
+    return { status: 200, json: { ok: true, content: 'hello' } };
+  }
+  return { status: 200, json: { ok: true } };
+}
+
+async function openFirstEditor(): Promise<{ view: EditorView | null }> {
+  const holder: { view: EditorView | null } = { view: null };
+  await act(async () => {
+    render(<FilesPage editorViewRef={(v) => { holder.view = v; }} />);
+  });
+  await act(async () => {
+    fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
+  });
+  return holder;
+}
+
 describe('web files page', () => {
   it('lists entries with per-type actions', async () => {    stubApi(filesHandler);
     await act(async () => {
@@ -286,5 +310,60 @@ describe('web files page', () => {
     });
     const img = document.querySelector('img[alt="i.png"]') as HTMLImageElement;
     expect(img.src).toContain('/api/files/preview');
+  });
+
+  it('prettifies the active tab in place', async () => {
+    stubApi(jsHandler);
+    const holder = await openFirstEditor();
+    expect(document.querySelector('.cm-content')?.textContent).toContain('const x=1');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Prettify' }));
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.cm-content')?.textContent).toContain('const x = 1;');
+    });
+    expect(holder.view?.state.doc.toString()).toBe('const x = 1;\n');
+  });
+
+  it('keeps content with an inline error on syntax failure', async () => {
+    stubApi(jsHandler);
+    const holder = await openFirstEditor();
+    await act(async () => {
+      const doc = holder.view?.state.doc;
+      holder.view?.dispatch({ changes: { from: 0, to: doc?.length ?? 0, insert: 'const =' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Prettify' }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toMatch(/Prettify failed/);
+    });
+    expect(holder.view?.state.doc.toString()).toBe('const =');
+  });
+
+  it('shows diff hunks and clears them after discard', async () => {
+    stubApi(jsHandler);
+    const holder = await openFirstEditor();
+    await act(async () => {
+      const doc = holder.view?.state.doc;
+      holder.view?.dispatch({ changes: { from: 0, to: doc?.length ?? 0, insert: 'const x = 2;' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Diff' }));
+    });
+    expect(screen.getByLabelText('Unsaved changes in m.js')).not.toBeNull();
+    expect(screen.getByText('@@ -1,1 +1,1 @@')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    });
+    expect(screen.getByText('No unsaved changes.')).not.toBeNull();
+  });
+
+  it('disables prettify for unsupported languages', async () => {
+    stubApi(filesHandler);
+    await openFirstEditor();
+    const button = screen.getByRole('button', { name: 'Prettify' });
+    expect(button).toHaveProperty('disabled', true);
+    expect(button.getAttribute('title')).toBe('Prettier has no txt parser here');
   });
 });
