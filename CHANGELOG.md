@@ -51,7 +51,7 @@ Termux/Alpine/macOS hardware.
   metadata, public ids, current flags), `POST :id/revoke` (404
   unknown, self clears cookie) + `POST others/revoke`; login captures
   UA/IP, touch refreshes per request; settings card wired (THIS
-  DEVICE, dialogs, fmtAgo). Smoke 61/61 on Linux.
+  DEVICE, dialogs, fmtAgo). Smoke 62/62 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
