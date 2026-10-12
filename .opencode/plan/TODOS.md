@@ -89,3 +89,12 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 — served by the Vite SPA in OLP, not the API server.
 
 - [x] Backend surface audit (drops recorded above; no silent gaps).
+
+## Phase 11 — Monitor wave 1 (read-only telemetry, approved 2026-10-12)
+
+- [~] W1-00 planning: spec + tasks + todos (`SPECS/spec-monitor-wave.md`, `TASKS/phase-11-monitor-wave.md`)
+- [ ] W1-01 sysinfo monitor providers
+- [ ] W1-02 server monitor routes
+- [ ] W1-03 smoke extension + live PASS/FAIL
+- [ ] W1-04 frontend monitor wiring
+- [ ] W1-05 docs + CAND-001/002/003/014 close-out (CAND-004 kill deferred by decision)
