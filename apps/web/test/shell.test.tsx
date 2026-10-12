@@ -193,6 +193,6 @@ describe('web monitor page', () => {
       </AppShell>,
     );
     expect(screen.getByText('CPU load')).not.toBeNull();
-    expect(screen.getAllByText('CAND-014').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CAND-004').length).toBeGreaterThan(0);
   });
 });

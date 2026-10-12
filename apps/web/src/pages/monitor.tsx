@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { apiJson } from '../lib/api.js';
-import { fmtUptime } from '../lib/format.js';
+import { fmtSize, fmtUptime } from '../lib/format.js';
 import { CpuArea } from '../components/charts/CpuArea.js';
 import type { CpuSample } from '../components/charts/CpuArea.js';
 import { DiskBar } from '../components/charts/DiskBar.js';
 import { MemoryDonut } from '../components/charts/MemoryDonut.js';
+import { NetSpark } from '../components/charts/NetSpark.js';
 import { ComingSoon } from '../components/common/States.js';
+import { DataTable } from '../components/common/DataTable.js';
 import { Badge } from '../components/common/Badge.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
@@ -14,16 +16,44 @@ import { Card } from '../components/ui/card.js';
 /** Cadence options (mockup parity: 500ms / 1s / 5s, client-side only). */
 const CADENCES = [500, 1000, 5000] as const;
 
-/** Ring-buffer cap for the panel-observed load history. */
+/** Ring-buffer cap for panel-observed histories. */
 export const HISTORY_CAP = 60;
 
-/** `/api/stats` subset consumed by the monitor. */
-interface MonitorStats {
+/** `/api/monitor/summary` subset consumed by the page. */
+export interface SummaryCore {
+  index: number;
+  percent: number | null;
+  freqMhz: number | null;
+}
+export interface MonitorSummary {
+  hostname: string;
   uptime: number;
-  cpu: { load1: number };
-  mem: { total: number; used: number };
-  disk: { total: number; used: number } | null;
+  arch: string;
+  kernel: string | null;
+  cpu: { load1: number; cores: number; perCore: SummaryCore[]; model: string | null; tempC: number | null };
+  mem: { total: number; used: number; swapTotal: number | null; swapFree: number | null };
+  disk: { total: number; used: number; io: { readRateBps: number; writeRateBps: number } | null } | null;
+  net: {
+    interfaces: Array<{ name: string; rxBytes: number; txBytes: number; rxRateBps: number | null; txRateBps: number | null }>;
+    listeningPorts: number[];
+  };
   battery: { percentage: number; status: string } | { error: string };
+}
+
+/** `/api/monitor/processes` subset consumed by the page. */
+export interface MonitorProc {
+  pid: number;
+  command: string;
+  cpuPercent: number | null;
+  memBytes: number;
+  uptimeSec: number | null;
+}
+export interface MonitorPm {
+  name: string;
+  pid: number | null;
+  status: string;
+  cpuPercent: number | null;
+  memBytes: number | null;
 }
 
 /** Serialize collected samples for the Export JSON download. */
@@ -32,33 +62,45 @@ export function buildExport(cadenceMs: number, samples: CpuSample[]): string {
 }
 
 /**
- * Monitor (`/monitor`): hardware telemetry with honest sourcing. Load
- * wave, memory donut, disk bar, uptime, and battery percent are real
- * (polled `/api/stats`; the wave is a panel-observed ring buffer, not
- * per-core telemetry). Everything without a source ships as a tracked
- * dummy: cluster details + thermal + disk rates (CAND-014), network
- * interfaces/sockets (CAND-002), process table (CAND-001) and kill
- * (CAND-004). Refresh cadence, pause, and export are client-side real;
- * Kill Task scrolls to the process section.
+ * Monitor (`/monitor`): live telemetry from the wave-1 endpoints.
+ * Load wave + network spark are panel-observed ring buffers; per-core
+ * bars, model/kernel/arch, temp, swap, disk rates, interfaces, sockets,
+ * process table, and PM2 rows are server-measured. Only process kill
+ * stays a tracked dummy (CAND-004 — deferred authz wave); Kill Task
+ * still scrolls to the process section. Refresh cadence, pause, and
+ * export are client-side real.
  */
 export function MonitorPage(): ReactElement {
   const [cadenceMs, setCadenceMs] = useState<number>(1000);
   const [paused, setPaused] = useState(false);
-  const [stats, setStats] = useState<MonitorStats | null>(null);
+  const [summary, setSummary] = useState<MonitorSummary | null>(null);
+  const [procs, setProcs] = useState<MonitorProc[]>([]);
+  const [pm2, setPm2] = useState<MonitorPm[] | null>(null);
   const [history, setHistory] = useState<CpuSample[]>([]);
+  const [netHist, setNetHist] = useState<Array<{ i: number; down: number; up: number }>>([]);
 
   useEffect(() => {
     if (paused) return;
     let alive = true;
     const poll = async (): Promise<void> => {
       try {
-        const body = await apiJson<MonitorStats>('/api/stats');
+        const [next, procBody] = await Promise.all([
+          apiJson<MonitorSummary>('/api/monitor/summary'),
+          apiJson<{ processes: MonitorProc[]; pm2: MonitorPm[] | null }>('/api/monitor/processes?limit=25'),
+        ]);
         if (!alive) return;
-        setStats(body);
+        setSummary(next);
+        setProcs(procBody.processes);
+        setPm2(procBody.pm2);
         setHistory((prev) => {
-          const next = [...prev.slice(-(HISTORY_CAP - 1)), { t: 'now', v: body.cpu.load1 }];
-          return next.map((s, i) => (i === next.length - 1 ? s : { ...s, t: `-${((next.length - 1 - i) * cadenceMs) / 1000}s` }));
+          const nextHist = [...prev.slice(-(HISTORY_CAP - 1)), { t: 'now', v: next.cpu.load1 }];
+          return nextHist.map((s, i) =>
+            i === nextHist.length - 1 ? s : { ...s, t: `-${((nextHist.length - 1 - i) * cadenceMs) / 1000}s` },
+          );
         });
+        const down = next.net.interfaces.reduce((sum, iface) => sum + (iface.rxRateBps ?? 0), 0);
+        const up = next.net.interfaces.reduce((sum, iface) => sum + (iface.txRateBps ?? 0), 0);
+        setNetHist((prev) => [...prev.slice(-(HISTORY_CAP - 1)), { i: prev.length, down, up }]);
       } catch {
         // keep the previous render on poll failure
       }
@@ -90,7 +132,11 @@ export function MonitorPage(): ReactElement {
     }
   };
 
-  const battery = stats !== null && 'percentage' in stats.battery ? stats.battery : null;
+  const battery = summary !== null && 'percentage' in summary.battery ? summary.battery : null;
+  const swapUsed =
+    summary !== null && summary.mem.swapTotal !== null && summary.mem.swapFree !== null
+      ? summary.mem.swapTotal - summary.mem.swapFree
+      : null;
 
   return (
     <main className="p-4">
@@ -128,28 +174,86 @@ export function MonitorPage(): ReactElement {
           <h2 className="mb-2 font-bold">CPU load</h2>
           <CpuArea label="Panel-observed" samples={history} />
           <p className="mt-1 text-xs text-neutral-500">
-            Panel-observed 1-minute load, sampled every {cadenceMs >= 1000 ? `${cadenceMs / 1000}s` : `${cadenceMs}ms`} — not per-core frequency (CAND-014).
+            Panel-observed 1-minute load, sampled every {cadenceMs >= 1000 ? `${cadenceMs / 1000}s` : `${cadenceMs}ms`}.
           </p>
+          {summary !== null && (
+            <div className="mt-2 flex flex-col gap-1">
+              {summary.cpu.perCore.slice(0, 8).map((core) => (
+                <div key={core.index} className="flex items-center gap-2 text-xs text-neutral-400">
+                  <span className="w-12 font-mono">cpu{core.index}</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-800">
+                    <div className="h-full rounded-full bg-emerald-500" style={{ width: `${core.percent ?? 0}%` }} />
+                  </div>
+                  <span className="w-16 text-right font-mono">
+                    {core.percent === null ? '—' : `${core.percent}%`}
+                    {core.freqMhz === null ? '' : ` ${core.freqMhz}MHz`}
+                  </span>
+                </div>
+              ))}
+              {summary.cpu.perCore.length > 8 && (
+                <p className="text-xs text-neutral-500">+{summary.cpu.perCore.length - 8} more cores</p>
+              )}
+              <p className="mt-1 text-xs text-neutral-500">
+                {[summary.cpu.model, summary.arch, summary.kernel].filter((p) => p !== null && p !== '').join(' · ')}
+                {summary.cpu.tempC !== null && ` · ${summary.cpu.tempC}°C`}
+              </p>
+            </div>
+          )}
         </Card>
         <Card>
           <h2 className="mb-2 font-bold">Memory</h2>
-          {stats === null ? (
+          {summary === null ? (
             <p className="text-sm text-neutral-400">Loading…</p>
           ) : (
-            <MemoryDonut label="Node" used={stats.mem.used} total={stats.mem.total} />
+            <>
+              <MemoryDonut label="Node" used={summary.mem.used} total={summary.mem.total} />
+              <p className="mt-1 text-xs text-neutral-500">
+                Swap {swapUsed === null || summary.mem.swapTotal === null ? '—' : `${fmtSize(swapUsed)} / ${fmtSize(summary.mem.swapTotal)}`}
+              </p>
+            </>
           )}
         </Card>
         <Card>
           <h2 className="mb-2 font-bold">Disk</h2>
-          {stats?.disk ? (
-            <DiskBar label="Data" used={stats.disk.used} total={stats.disk.total} />
+          {summary?.disk ? (
+            <>
+              <DiskBar label="Data" used={summary.disk.used} total={summary.disk.total} />
+              <p className="mt-1 text-xs text-neutral-500">
+                {summary.disk.io === null
+                  ? 'I/O rates on next poll'
+                  : `Read ${fmtSize(summary.disk.io.readRateBps)}/s · Write ${fmtSize(summary.disk.io.writeRateBps)}/s`}
+              </p>
+            </>
           ) : (
             <p className="text-sm text-neutral-400">Loading…</p>
           )}
         </Card>
         <Card>
+          <h2 className="mb-2 font-bold">Network</h2>
+          {summary === null ? (
+            <p className="text-sm text-neutral-400">Loading…</p>
+          ) : (
+            <>
+              <NetSpark label="Throughput" unitLabel="B/s" down={netHist.map((s) => s.down)} up={netHist.map((s) => s.up)} />
+              <ul className="mt-2 flex flex-col gap-1 text-xs text-neutral-400">
+                {summary.net.interfaces.map((iface) => (
+                  <li key={iface.name} className="flex justify-between gap-2 font-mono">
+                    <span>{iface.name}</span>
+                    <span>↓ {fmtSize(iface.rxBytes)} ↑ {fmtSize(iface.txBytes)}</span>
+                  </li>
+                ))}
+              </ul>
+              {summary.net.listeningPorts.length > 0 && (
+                <p className="mt-1 font-mono text-xs text-neutral-500">
+                  LISTEN :{summary.net.listeningPorts.join(' :')}
+                </p>
+              )}
+            </>
+          )}
+        </Card>
+        <Card>
           <h2 className="mb-2 font-bold">Node</h2>
-          <p className="text-sm text-neutral-300">Uptime {stats === null ? '—' : fmtUptime(stats.uptime)}</p>
+          <p className="text-sm text-neutral-300">Uptime {summary === null ? '—' : fmtUptime(summary.uptime)}</p>
           <p className="mt-1 text-sm text-neutral-300">
             Battery {battery === null ? '—' : `${battery.percentage}% · ${battery.status}`}
           </p>
@@ -157,9 +261,41 @@ export function MonitorPage(): ReactElement {
       </div>
 
       <div className="mt-3 flex flex-col gap-3" id="monitor-processes">
-        <ComingSoon feature="Cluster & thermal details" candidate="CAND-014" />
-        <ComingSoon feature="Network I/O & sockets" candidate="CAND-002" />
-        <ComingSoon feature="Active processes" candidate="CAND-001" />
+        <Card className="p-0">
+          <div className="overflow-x-auto">
+            <DataTable<MonitorProc>
+              label="Active processes"
+              columns={[
+                { key: 'pid', header: 'PID', cell: (p) => <span className="font-mono">{p.pid}</span> },
+                {
+                  key: 'command',
+                  header: 'Process Command',
+                  cell: (p) => <span className="font-mono text-xs">{p.command}</span>,
+                },
+                { key: 'cpu', header: 'CPU %', cell: (p) => (p.cpuPercent === null ? '—' : `${p.cpuPercent}%`) },
+                { key: 'mem', header: 'MEM', cell: (p) => fmtSize(p.memBytes) },
+                { key: 'uptime', header: 'Uptime', cell: (p) => (p.uptimeSec === null ? '—' : fmtUptime(p.uptimeSec)) },
+              ]}
+              rows={procs}
+              rowKey={(p) => String(p.pid)}
+              emptyText="No processes yet"
+            />
+          </div>
+        </Card>
+        {pm2 !== null && pm2.length > 0 && (
+          <Card>
+            <h2 className="mb-2 font-bold">PM2 ({pm2.length})</h2>
+            <ul className="flex flex-col gap-1 text-sm">
+              {pm2.map((row) => (
+                <li key={row.name} className="flex items-center gap-2">
+                  <span className="mr-auto font-mono text-xs">{row.name}</span>
+                  <span className="text-xs text-neutral-400">{row.status}</span>
+                  {row.memBytes !== null && <span className="text-xs text-neutral-400">{fmtSize(row.memBytes)}</span>}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
         <ComingSoon feature="Process kill" candidate="CAND-004" />
       </div>
     </main>

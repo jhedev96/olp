@@ -3,12 +3,33 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MonitorPage, buildExport } from '../src/pages/monitor.js';
 
-const STATS = {
+const SUMMARY = {
+  hostname: 'monbox',
   uptime: 90061,
-  cpu: { load1: 0.42 },
-  mem: { total: 8000, used: 5400 },
-  disk: { total: 128000, used: 45000 },
+  arch: 'x64',
+  kernel: '6.1.0-test',
+  cpu: {
+    load1: 0.42,
+    cores: 2,
+    perCore: [
+      { index: 0, percent: 34, freqMhz: 1800 },
+      { index: 1, percent: null, freqMhz: null },
+    ],
+    model: 'Test CPU',
+    tempC: 38.5,
+  },
+  mem: { total: 8000, used: 5400, swapTotal: 2000, swapFree: 1800 },
+  disk: { total: 128000, used: 45000, io: { readRateBps: 18000000, writeRateBps: 6400000 } },
+  net: {
+    interfaces: [{ name: 'wlan0', rxBytes: 42000000, txBytes: 18400000, rxRateBps: 2400000, upRateBps: 0, txRateBps: 840000 }],
+    listeningPorts: [8080, 3306],
+  },
   battery: { percentage: 91, status: 'CHARGING' },
+};
+
+const PROCS = {
+  processes: [{ pid: 42, command: 'node worker.js', cpuPercent: 1.4, memBytes: 142000 * 1024, uptimeSec: 3661 }],
+  pm2: [{ name: 'api', pid: 7, status: 'online', cpuPercent: 0.5, memBytes: 1000 }],
 };
 
 afterEach(() => {
@@ -17,28 +38,38 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function stubStats(): void {
-  vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(STATS), { status: 200 })));
+function stubMonitor(): void {
+  vi.stubGlobal('fetch', (url: string) => {
+    const body = url.startsWith('/api/monitor/processes') ? PROCS : SUMMARY;
+    return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+  });
 }
 
 describe('web monitor page', () => {
-  it('renders live values with tracked dummies', async () => {
-    stubStats();
+  it('renders live telemetry with one tracked kill dummy', async () => {
+    stubMonitor();
     await act(async () => {
       render(<MonitorPage />);
     });
     expect(screen.getByText('Monitor')).not.toBeNull();
     expect(await screen.findByText(/0\.4/)).not.toBeNull();
+    expect(screen.getByText(/Test CPU/)).not.toBeNull();
+    expect(screen.getByText(/38\.5°C/)).not.toBeNull();
     expect(screen.getByText('68%')).not.toBeNull();
     expect(screen.getByText(/1d 1h/)).not.toBeNull();
     expect(screen.getByText(/91% · CHARGING/)).not.toBeNull();
-    for (const id of ['CAND-014', 'CAND-002', 'CAND-001', 'CAND-004']) {
-      expect(screen.getByText(id)).not.toBeNull();
-    }
+    expect(screen.getByText('node worker.js')).not.toBeNull();
+    expect(screen.getByText('api')).not.toBeNull();
+    expect(screen.getByText('wlan0')).not.toBeNull();
+    expect(screen.getByText(/LISTEN :8080 :3306/)).not.toBeNull();
+    expect(screen.getByText('CAND-004')).not.toBeNull();
+    expect(screen.queryByText('CAND-001')).toBeNull();
+    expect(screen.queryByText('CAND-002')).toBeNull();
+    expect(screen.queryByText('CAND-014')).toBeNull();
   });
 
   it('pauses the stream and switches cadence', async () => {
-    stubStats();
+    stubMonitor();
     await act(async () => {
       render(<MonitorPage />);
     });
