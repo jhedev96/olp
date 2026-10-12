@@ -4,10 +4,11 @@ import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Badge } from '../components/common/Badge.js';
-import { ComingSoon } from '../components/common/States.js';
 import { DataTable } from '../components/common/DataTable.js';
 import { Button } from '../components/ui/button.js';
+import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
+import { readAsDataURL } from './files.js';
 
 /** `/api/backups` row shape (server contract). */
 export interface BackupRow {
@@ -18,19 +19,40 @@ export interface BackupRow {
   size: number;
   mtime: number;
   created: number;
+  sha256?: string;
+}
+
+/** `/api/backups/schedules` row shape. */
+export interface BackupScheduleRow {
+  id: string;
+  name: string;
+  type: 'folder' | 'mysql' | 'postgres';
+  source: string;
+  schedule: string;
+  enabled: boolean;
+  created: number;
+  lastRun: number | null;
+  lastStatus: string | null;
+  nextRun: number | null;
+}
+
+/** `/api/backups/:name/verify` shape. */
+export interface VerifyState {
+  sha256: string;
+  match: boolean | null;
 }
 
 const BACKUP_TYPES = ['folder', 'mysql', 'postgres'] as const;
 
 /**
  * Backups (mockup backup parity): stats header, storage pool, engine
- * chips, newest-first table with download/restore/delete, dialog-gated
- * destructive actions. Engine chips resolve via the install catalog
- * (`mysqldump` ships with mysql, `pg_dump` with postgres — documented
- * assumption). Honestly omitted (no source, backend frozen): scheduled
- * snapshots, archive upload, SHA256 verify, full-system bundle, gzip
- * variant (CAND-029). Restore uses the stored default target (empty
- * body, Terwo parity).
+ * chips, newest-first table with download/restore/delete/verify,
+ * gzip dumps, archive upload, scheduled snapshots with last-run, and
+ * dialog-gated destructive actions. Engine chips resolve via the
+ * install catalog (`mysqldump` ships with mysql, `pg_dump` with
+ * postgres — documented assumption). Full-system bundle stays out
+ * (CAND-035); auto-prune stays out (retention design needed). Restore
+ * uses the stored default target (empty body, Terwo parity).
  */
 export function BackupPage(): ReactElement {
   const [backups, setBackups] = useState<BackupRow[]>([]);
@@ -43,6 +65,11 @@ export function BackupPage(): ReactElement {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [oldestFirst, setOldestFirst] = useState(false);
+  const [gzip, setGzip] = useState(false);
+  const [verifyMap, setVerifyMap] = useState<Record<string, VerifyState | null>>({});
+  const [schedules, setSchedules] = useState<BackupScheduleRow[]>([]);
+  const [schedForm, setSchedForm] = useState({ name: '', type: 'folder', source: '', schedule: '0 2 * * *' });
+  const [uploadType, setUploadType] = useState('folder');
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -89,7 +116,7 @@ export function BackupPage(): ReactElement {
       const body = await apiJson<{ ok?: unknown; error?: string }>('/api/backups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name.trim(), type: form.type, source: form.source.trim() }),
+        body: JSON.stringify({ name: form.name.trim(), type: form.type, source: form.source.trim(), gzip: form.type !== 'folder' && gzip }),
       });
       if (body.ok === true) {
         setForm({ name: '', type: 'folder', source: '' });
@@ -98,6 +125,78 @@ export function BackupPage(): ReactElement {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed');
     }
+  };
+
+  const verify = async (backup: BackupRow): Promise<void> => {
+    setError('');
+    try {
+      const body = await apiJson<VerifyState & { ok?: unknown }>(`/api/backups/${encodeURIComponent(backup.name)}/verify`);
+      setVerifyMap((prev) => ({ ...prev, [backup.name]: { sha256: body.sha256, match: body.match } }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const upload = async (file: File | undefined): Promise<void> => {
+    if (file === undefined) return;
+    setError('');
+    try {
+      const dataUrl = await readAsDataURL(file);
+      const body = await apiJson<{ ok?: unknown; error?: string }>('/api/backups/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: uploadType, data: dataUrl.split(',')[1] ?? '' }),
+      });
+      if (body.ok === true) await load();
+      else setError(typeof body.error === 'string' ? body.error : 'Upload failed');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Upload failed');
+    }
+  };
+
+  const loadSchedules = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ schedules: BackupScheduleRow[] }>('/api/backups/schedules');
+      if (Array.isArray(body.schedules)) setSchedules(body.schedules);
+    } catch {
+      // schedules section keeps the previous render
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSchedules();
+  }, [loadSchedules]);
+
+  const saveSchedule = async (): Promise<void> => {
+    setError('');
+    try {
+      const body = await apiJson<{ ok?: unknown; error?: string }>('/api/backups/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: schedForm.name.trim(),
+          type: schedForm.type,
+          source: schedForm.source.trim(),
+          schedule: schedForm.schedule.trim(),
+        }),
+      });
+      if (body.ok === true) {
+        setSchedForm({ name: '', type: 'folder', source: '', schedule: '0 2 * * *' });
+        await loadSchedules();
+      } else setError(typeof body.error === 'string' ? body.error : 'Failed');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const toggleSchedule = async (id: string): Promise<void> => {
+    await apiJson(`/api/backups/schedules/${id}/toggle`, { method: 'POST' }).catch(() => undefined);
+    await loadSchedules();
+  };
+
+  const removeSchedule = async (id: string): Promise<void> => {
+    await apiJson(`/api/backups/schedules/${id}`, { method: 'DELETE' }).catch(() => undefined);
+    await loadSchedules();
   };
 
   const restore = (backup: BackupRow): void => {
@@ -195,6 +294,37 @@ export function BackupPage(): ReactElement {
         <Button size="sm" onClick={() => void save()}>
           Create backup
         </Button>
+        {form.type !== 'folder' && (
+          <label className="flex items-center gap-1 text-sm text-neutral-300">
+            <input type="checkbox" checked={gzip} onChange={(ev) => setGzip(ev.target.checked)} />
+            Gzip (.sql.gz)
+          </label>
+        )}
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Upload type"
+          className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+          value={uploadType}
+          onChange={(ev) => setUploadType(ev.target.value)}
+        >
+          {BACKUP_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </select>
+        <label className="cursor-pointer rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+          Upload archive
+          <input
+            type="file"
+            className="hidden"
+            onChange={(ev) => {
+              void upload(ev.target.files?.[0]);
+              ev.target.value = '';
+            }}
+          />
+        </label>
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input
@@ -250,19 +380,30 @@ export function BackupPage(): ReactElement {
             {
               key: 'actions',
               header: 'Actions',
-              cell: (backup) => (
-                <div className="flex gap-1">
-                  <a className="text-xs text-green-400" href={`/api/backups/${encodeURIComponent(backup.name)}/download`}>
-                    Download
-                  </a>
-                  <Button size="sm" variant="outline" onClick={() => void restore(backup)}>
-                    Restore
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => void remove(backup)}>
-                    Delete
-                  </Button>
-                </div>
-              ),
+              cell: (backup) => {
+                const verified = verifyMap[backup.name];
+                return (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <a className="text-xs text-green-400" href={`/api/backups/${encodeURIComponent(backup.name)}/download`}>
+                      Download
+                    </a>
+                    <Button size="sm" variant="outline" onClick={() => void restore(backup)}>
+                      Restore
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void verify(backup)}>
+                      Verify
+                    </Button>
+                    {verified !== undefined && verified !== null && (
+                      <Badge tone={verified.match === false ? 'danger' : 'success'}>
+                        {verified.match === null ? 'hash, unverified' : verified.match ? 'SHA256 OK' : 'MISMATCH'}
+                      </Badge>
+                    )}
+                    <Button size="sm" variant="destructive" onClick={() => void remove(backup)}>
+                      Delete
+                    </Button>
+                  </div>
+                );
+              },
             },
           ]}
           rows={sorted}
@@ -289,7 +430,60 @@ export function BackupPage(): ReactElement {
         onCancel={() => setPendingDelete(null)}
       />
       <div className="mt-3">
-        <ComingSoon feature="Scheduled snapshots, upload & verify" candidate="CAND-029" />
+        <Card>
+          <h2 className="mb-2 font-bold">Scheduled snapshots</h2>
+          <div className="mb-3 flex flex-wrap items-end gap-2">
+            <Input placeholder="Schedule name (optional)" value={schedForm.name} onChange={(ev) => setSchedForm({ ...schedForm, name: ev.target.value })} className="w-48" />
+            <select
+              aria-label="Scheduled type"
+              className="h-9 rounded-md border border-neutral-700 bg-transparent px-2 text-sm"
+              value={schedForm.type}
+              onChange={(ev) => setSchedForm({ ...schedForm, type: ev.target.value })}
+            >
+              {BACKUP_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+            <Input placeholder="Folder path or database" value={schedForm.source} onChange={(ev) => setSchedForm({ ...schedForm, source: ev.target.value })} className="w-56" />
+            <Input
+              placeholder="* * * * *"
+              aria-label="Scheduled cron expression"
+              value={schedForm.schedule}
+              onChange={(ev) => setSchedForm({ ...schedForm, schedule: ev.target.value })}
+              className="w-36"
+            />
+            <Button size="sm" onClick={() => void saveSchedule()}>
+              Add schedule
+            </Button>
+          </div>
+          {schedules.length === 0 ? (
+            <p className="text-sm text-neutral-400">No schedules yet — snapshots run while the panel is up.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {schedules.map((sched) => (
+                <li key={sched.id} className="flex flex-wrap items-center gap-2 rounded border border-neutral-800 px-2 py-1.5 text-sm">
+                  <span className="mr-auto font-medium">{sched.name}</span>
+                  <code className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-xs text-emerald-300">{sched.schedule}</code>
+                  <span className="font-mono text-xs text-neutral-400">{sched.type}:{sched.source}</span>
+                  <span className="text-xs text-neutral-400">
+                    {sched.lastRun === null ? 'never ran' : `last ${fmtDate(sched.lastRun)}${sched.lastStatus === null || sched.lastStatus === 'ok' ? '' : ` · ${sched.lastStatus}`}`}
+                  </span>
+                  <span className={sched.enabled ? 'text-xs text-green-400' : 'text-xs text-neutral-500'}>
+                    {sched.enabled ? 'Enabled' : 'Stopped'}
+                  </span>
+                  <Button size="sm" variant="outline" onClick={() => void toggleSchedule(sched.id)}>
+                    {sched.enabled ? 'Disable' : 'Enable'}
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => void removeSchedule(sched.id)}>
+                    Delete
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
     </main>
   );
