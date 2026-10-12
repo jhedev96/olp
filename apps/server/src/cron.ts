@@ -2,6 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
+import { nextRunMs } from './cron-schedule.js';
+import type { RunRecord, RunStore } from './cron-runs.js';
+import { fileRunStore, memoryRunStore } from './cron-runs.js';
 
 /** One tagged schedule entry. */
 export interface CronJob {
@@ -22,7 +25,22 @@ export interface CronBackend {
   /** Fire-and-forget daemon start (`crond` detached + unrefed). */
   spawnDetached(cmd: string, args: string[]): void;
   hasBin(bin: string): Promise<boolean>;
+  /** Run a command with capture (Run Now). Rejects only on spawn failure. */
+  runCommand(cmd: string, timeoutMs: number): Promise<RunResult>;
 }
+
+/** Captured execution (output capped to the last 8 KB). */
+export interface RunResult {
+  exitCode: number | null;
+  timedOut: boolean;
+  output: string;
+  latencyMs: number;
+}
+
+/** Run Now bound (documented; kills with SIGTERM past the deadline). */
+export const RUN_TIMEOUT_MS = 60000;
+/** Output tail kept per run (documented). */
+export const RUN_OUTPUT_CAP = 8192;
 
 /** Production backend over `crontab(1)`/`crond(8)` CLIs. */
 export function nodeCronBackend(): CronBackend {
@@ -64,6 +82,27 @@ export function nodeCronBackend(): CronBackend {
         return false;
       }
     },
+    runCommand: (cmd, timeoutMs) =>
+      new Promise<RunResult>((resolve, reject) => {
+        const start = Date.now();
+        const child = spawn('bash', ['-c', cmd], { timeout: timeoutMs });
+        let out = '';
+        const push = (d: unknown): void => {
+          out += Buffer.isBuffer(d) ? d.toString('utf8') : String(d);
+          if (out.length > RUN_OUTPUT_CAP + 512) out = out.slice(-RUN_OUTPUT_CAP);
+        };
+        child.stdout?.on('data', push);
+        child.stderr?.on('data', push);
+        child.on('error', (err) => reject(err));
+        child.on('close', (code, signal) => {
+          resolve({
+            exitCode: signal !== null ? null : code,
+            timedOut: signal !== null,
+            output: out.slice(-RUN_OUTPUT_CAP),
+            latencyMs: Date.now() - start,
+          });
+        });
+      }),
   };
 }
 
@@ -114,6 +153,10 @@ export function toggleCronLine(line: string, id: string): string {
 /** Inputs for {@link registerCronRoutes}. */
 export interface CronOptions {
   backend: CronBackend;
+  /** Run store override (tests pass memory/fakes; default is memory). */
+  runs?: RunStore;
+  /** File path for persisted runs (production: dataDir; omitted → memory). */
+  runsPath?: string;
 }
 
 function strField(body: Record<string, unknown>, key: string): string {
@@ -127,6 +170,16 @@ function strField(body: Record<string, unknown>, key: string): string {
  */
 export function registerCronRoutes(app: FastifyInstance, opts: CronOptions): void {
   const { backend } = opts;
+  const runs: RunStore = opts.runs ?? (opts.runsPath !== undefined ? fileRunStore(opts.runsPath) : memoryRunStore());
+
+  const readJobs = async (): Promise<CronJob[]> => {
+    const jobs: CronJob[] = [];
+    for (const line of await backend.readLines()) {
+      const job = parseCronLine(line);
+      if (job !== null) jobs.push(job);
+    }
+    return jobs;
+  };
 
   app.get('/api/cron/status', async () => {
     try {
@@ -154,12 +207,8 @@ export function registerCronRoutes(app: FastifyInstance, opts: CronOptions): voi
   });
 
   app.get('/api/cron/jobs', async () => {
-    const jobs: CronJob[] = [];
-    for (const line of await backend.readLines()) {
-      const job = parseCronLine(line);
-      if (job !== null) jobs.push(job);
-    }
-    return { jobs };
+    const now = Date.now();
+    return { jobs: (await readJobs()).map((job) => ({ ...job, nextRun: nextRunMs(job.schedule, now) })) };
   });
 
   app.post('/api/cron/jobs', { bodyLimit: 1024 * 1024 }, async (req) => {
@@ -194,5 +243,92 @@ export function registerCronRoutes(app: FastifyInstance, opts: CronOptions): voi
     }
     await backend.writeLines(kept);
     return { ok: true };
+  });
+
+  app.post('/api/cron/jobs/:id/run', { bodyLimit: 1024 }, async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const job = (await readJobs()).find((j) => j.id === id);
+    if (job === undefined) {
+      reply.code(404);
+      return { error: 'Unknown job' };
+    }
+    const startedAt = Date.now();
+    let result;
+    try {
+      result = await backend.runCommand(job.command, RUN_TIMEOUT_MS);
+    } catch (err) {
+      const message = err instanceof Error && err.message !== '' ? err.message : 'Run failed to start';
+      reply.code(500);
+      return { error: message };
+    }
+    const record: RunRecord = {
+      id: randomBytes(4).toString('hex'),
+      jobId: job.id,
+      name: job.name,
+      command: job.command,
+      startedAt,
+      finishedAt: Date.now(),
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      latencyMs: result.latencyMs,
+      output: result.output,
+    };
+    runs.append(record);
+    return { ok: true, run: record };
+  });
+
+  app.get('/api/cron/runs', async (req) => {
+    const raw = ((req.query ?? {}) as Record<string, unknown>)['limit'];
+    const limit = typeof raw === 'string' ? Number.parseInt(raw, 10) : 50;
+    return { runs: runs.list(Number.isInteger(limit) ? limit : 50) };
+  });
+
+  app.post('/api/cron/jobs/dry-run', async () => {
+    const now = Date.now();
+    const results = [];
+    for (const job of await readJobs()) {
+      const next = nextRunMs(job.schedule, now);
+      const token = job.command.trim().split(/\s+/).find((t) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) ?? '';
+      if (next === null) {
+        results.push({ id: job.id, name: job.name, enabled: job.enabled, ok: false, nextRun: null, resolved: false, error: 'Invalid schedule' });
+        continue;
+      }
+      if (token === '') {
+        results.push({ id: job.id, name: job.name, enabled: job.enabled, ok: false, nextRun: null, resolved: false, error: 'Empty command' });
+        continue;
+      }
+      const resolved = await backend.hasBin(token);
+      results.push({
+        id: job.id,
+        name: job.name,
+        enabled: job.enabled,
+        ok: resolved,
+        nextRun: next,
+        resolved,
+        error: resolved ? null : `Command not found: ${token}`,
+      });
+    }
+    return { results };
+  });
+
+  app.get('/api/cron/daemon', async () => {
+    let running = false;
+    try {
+      await backend.exec('pgrep -x crond >/dev/null 2>&1', 5000);
+      running = true;
+    } catch {
+      running = false;
+    }
+    let pid: number | null = null;
+    try {
+      const out = await backend.exec('pidof crond', 5000);
+      const first = out.trim().split(/\s+/)[0] ?? '';
+      const n = Number.parseInt(first, 10);
+      pid = Number.isInteger(n) && n > 0 ? n : null;
+    } catch {
+      pid = null;
+    }
+    return { running, pid };
   });
 }

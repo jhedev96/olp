@@ -140,7 +140,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     sys: opts.backupSys ?? nodeBackupSys(),
     dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
   });
-  registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend() });
+  registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend(), runsPath: join(dataDir, 'cron-runs.json') });
   const settingsStore = opts.settingsStore ?? fileSettingsStore(auth.dataDir);
   const telegramApi = opts.telegramApi ?? nodeTelegramApi();
   const botStatus = async (): Promise<BotStatus> => {

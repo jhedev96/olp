@@ -7,6 +7,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
+import { nodeCronBackend } from '../src/cron.js';
 import { cronJobLine, parseCronLine, toggleCronLine } from '../src/cron.js';
 import type { CronBackend } from '../src/cron.js';
 
@@ -53,6 +54,7 @@ function memoryBackend(seed: string[] = [], bins: Record<string, boolean> = {}):
       spawns.push({ cmd, args });
     },
     hasBin: (bin) => Promise.resolve(bins[bin] ?? true),
+    runCommand: (cmd) => Promise.resolve({ exitCode: 0, timedOut: false, output: `ran:${cmd}`, latencyMs: 5 }),
   };
 }
 
@@ -145,8 +147,8 @@ describe('server cron routes', () => {
     const jobs = await app.inject({ method: 'GET', url: '/api/cron/jobs', headers: { cookie } });
     expect(jobs.json()).toEqual({
       jobs: [
-        { id: 'aa11', name: 'first', schedule: '*/5 * * * *', command: '/bin/a', enabled: true },
-        { id: 'bb22', name: 'second', schedule: '0 1 * * *', command: '/bin/b', enabled: false },
+        { id: 'aa11', name: 'first', schedule: '*/5 * * * *', command: '/bin/a', enabled: true, nextRun: expect.any(Number) },
+        { id: 'bb22', name: 'second', schedule: '0 1 * * *', command: '/bin/b', enabled: false, nextRun: expect.any(Number) },
       ],
     });
     const status = await app.inject({ method: 'GET', url: '/api/cron/status', headers: { cookie } });
@@ -243,5 +245,61 @@ describe('server cron routes', () => {
     const denied = await app2.inject({ method: 'POST', url: '/api/cron/service', headers: { cookie: cookie2 }, payload: { action: 'start' } });
     expect(denied.statusCode).toBe(400);
     expect(denied.json().error).toMatch(/Install Cronie/);
+  });
+
+  it('runs jobs by id and records history', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const backend = memoryBackend(['*/5 * * * * /bin/a # panel:aa11:first']);
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, cronBackend: backend });
+    const cookie = await authedCookie(app);
+    const run = await app.inject({ method: 'POST', url: '/api/cron/jobs/aa11/run', headers: { cookie } });
+    expect(run.statusCode).toBe(200);
+    expect(run.json()).toMatchObject({ ok: true, run: { jobId: 'aa11', exitCode: 0, timedOut: false } });
+    const missing = await app.inject({ method: 'POST', url: '/api/cron/jobs/zz99/run', headers: { cookie } });
+    expect(missing.statusCode).toBe(404);
+    const runs = await app.inject({ method: 'GET', url: '/api/cron/runs?limit=10', headers: { cookie } });
+    expect(runs.json().runs).toHaveLength(1);
+    expect(runs.json().runs[0]).toMatchObject({ jobId: 'aa11', name: 'first' });
+  });
+
+describe('nodeCronBackend runCommand', () => {
+  it('captures output, failures, timeouts and spawn errors', async () => {
+    const backend = nodeCronBackend();
+    const ok = await backend.runCommand('echo hello', 5000);
+    expect(ok.exitCode).toBe(0);
+    expect(ok.timedOut).toBe(false);
+    expect(ok.output).toContain('hello');
+    expect(ok.latencyMs).toBeGreaterThanOrEqual(0);
+    const fail = await backend.runCommand('exit 3', 5000);
+    expect(fail).toMatchObject({ exitCode: 3, timedOut: false });
+    const slow = await backend.runCommand('sleep 5', 200);
+    expect(slow).toMatchObject({ exitCode: null, timedOut: true });
+    const missing = await backend.runCommand('definitely-not-a-binary-xyz', 5000);
+    expect(missing.exitCode).toBe(127);
+    expect(missing.output).toContain('command not found');
+  });
+});
+
+  it('dry-runs all jobs and reports the daemon', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const backend = memoryBackend(
+      ['*/5 * * * * /bin/a # panel:aa11:first', '61 * * * * /bin/b # panel:bb22:second'],
+      { '/bin/a': true, '/bin/b': false },
+    );
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, cronBackend: backend });
+    const cookie = await authedCookie(app);
+    const dry = await app.inject({ method: 'POST', url: '/api/cron/jobs/dry-run', headers: { cookie } });
+    expect(dry.json()).toEqual({
+      results: [
+        { id: 'aa11', name: 'first', enabled: true, ok: true, nextRun: expect.any(Number), resolved: true, error: null },
+        { id: 'bb22', name: 'second', enabled: true, ok: false, nextRun: null, resolved: false, error: 'Invalid schedule' },
+      ],
+    });
+    const daemon = await app.inject({ method: 'GET', url: '/api/cron/daemon', headers: { cookie } });
+    expect(daemon.json()).toEqual({ running: true, pid: null });
+    expect((await app.inject({ method: 'GET', url: '/api/cron/runs' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/cron/jobs/aa11/run' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/cron/jobs/dry-run' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'GET', url: '/api/cron/daemon' })).statusCode).toBe(401);
   });
 });

@@ -28,7 +28,10 @@ const JOBS = {
 
 function base(url: string): { status: number; json: unknown } {
   if (url === '/api/cron/status') return { status: 200, json: { running: true } };
-  if (url === '/api/cron/jobs') return { status: 200, json: JOBS };
+  if (url === '/api/cron/daemon') return { status: 200, json: { running: true, pid: 24108 } };
+  if (url === '/api/cron/jobs') return { status: 200, json: { jobs: JOBS.jobs.map((j) => ({ ...j, nextRun: Date.now() + 60000 })) } };
+  if (url.startsWith('/api/cron/runs')) return { status: 200, json: { runs: [] } };
+  if (url === '/api/stats') return { status: 200, json: { battery: { percentage: 80, status: 'DISCHARGING' } } };
   return { status: 200, json: { ok: true, job: { id: 'c3' } } };
 }
 
@@ -109,8 +112,11 @@ describe('web cron page', () => {
     await act(async () => {
       render(<CronPage />);
     });
-    expect(screen.getByText('CAND-028')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Dry-run all' })).toHaveProperty('disabled', true);
+    expect(screen.queryByText('CAND-028')).toBeNull();
+    expect(screen.getByText(/Next in/)).not.toBeNull();
+    expect(screen.getByText('PID 24108')).not.toBeNull();
+    expect(screen.getByText(/Battery 80%/)).not.toBeNull();
+    expect(screen.getByText(/panel-triggered runs only/)).not.toBeNull();
     fireEvent.change(screen.getByLabelText('Search jobs'), { target: { value: 'zzz' } });
     expect(screen.getByText('No matches')).not.toBeNull();
     fireEvent.change(screen.getByLabelText('Search jobs'), { target: { value: '' } });
@@ -123,5 +129,35 @@ describe('web cron page', () => {
       fireEvent.click(screen.getByText('Close'));
     });
     expect(screen.queryByText('Crontab (read-only)')).toBeNull();
+  });
+
+  it('dry-runs all jobs and runs one now', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      let json: unknown = base(url).json;
+      if (url === '/api/cron/jobs/dry-run') {
+        json = { results: [{ id: 'a1', name: 'nightly', enabled: true, ok: true, nextRun: 1, resolved: true, error: null }] };
+      }
+      if (url === '/api/cron/jobs/a1/run') {
+        json = { ok: true, run: { exitCode: 0, latencyMs: 12 } };
+      }
+      return Promise.resolve(new Response(JSON.stringify(json), { status: 200 }));
+    });
+    await act(async () => {
+      render(<CronPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Dry-run all'));
+    });
+    expect(screen.getByText('Dry-run results')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Close'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Run now')[0] as HTMLElement);
+    });
+    expect(calls).toContain('POST /api/cron/jobs/a1/run');
+    expect(screen.getByText(/Ran nightly: exit 0 in 12ms/)).not.toBeNull();
   });
 });

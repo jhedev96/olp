@@ -48,7 +48,9 @@ describe('migrate legacy registries', () => {
     expect(migrateLegacy('/data', '/legacy', failing)).toEqual(['sites.json']);
   });
 
-  it('migrates on real server boot (guide claim)', async () => {
+  it(
+    'migrates on real server boot (guide claim)',
+    async () => {
     const { buildServer } = await import('../src/index.js');
     const { hashPassword } = await import('@olp/auth');
     const base = mkdtempSync(join(tmpdir(), 'olp-mig-'));
@@ -69,5 +71,8 @@ describe('migrate legacy registries', () => {
       payload: { username: 'old', password: 'pw123456' },
     });
     expect(login.statusCode).toBe(200);
-  });
+    },
+    // Real boot + PBKDF2 login exceeds the 5 s default on weak boxes (see web vitest.config.ts).
+    30000,
+  );
 });
