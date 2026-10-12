@@ -66,6 +66,11 @@ Termux/Alpine/macOS hardware.
   (6 rebranded presets + custom localStorage snippets, one-tap
   `sendKey`) with destructive-confirm guard + inline add/delete;
   no smoke (no backend surface).
+- Passkey + local login wave 12: WebAuthn register/login (adapter
+  seam, 24h sessions, password stays primary) + loopback
+  `POST /api/login/local` (strict peer gate, residual recorded);
+  login + settings wired; smoke options-shapes + local ALL GREEN
+  (70+ live); real-authenticator proof stays a HUMAN GATE.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
