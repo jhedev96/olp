@@ -395,4 +395,28 @@ describe('server backup routes', () => {
     expect(verify.json()).toMatchObject({ ok: true, match: null });
     expect(typeof verify.json().sha256).toBe('string');
   });
+
+  it('imports uploads with validation and round-trips restore', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    const upload = (payload: unknown) =>
+      app.inject({ method: 'POST', url: '/api/backups/upload', headers: { cookie }, payload });
+    expect((await upload({ type: 'dvd', data: 'eA==' })).json().error).toBe('Invalid type');
+    expect((await upload({ type: 'folder' })).json().error).toBe('Archive data is required');
+    const data = Buffer.from('UPLOADDATA').toString('base64');
+    const ok = await upload({ type: 'folder', name: 'up1', data });
+    expect(ok.json()).toEqual({ ok: true, name: 'up1' });
+    expect((await upload({ type: 'folder', name: 'up1', data })).json().error).toBe('Backup name already taken');
+    const list = await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } });
+    expect(list.json().backups).toMatchObject([{ name: 'up1', file: 'up1.zip', source: 'upload' }]);
+    const verify = await app.inject({ method: 'GET', url: '/api/backups/up1/verify', headers: { cookie } });
+    expect(verify.json()).toMatchObject({ ok: true, match: true });
+    sys.dirs.add(join(root, 'restored'));
+    const restored = await app.inject({ method: 'POST', url: '/api/backups/up1/restore', headers: { cookie }, payload: { targetPath: 'restored' } });
+    expect(restored.json()).toEqual({ ok: true });
+    const data2 = Buffer.from('UPLOADDATA').toString('base64');
+    expect((await app.inject({ method: 'POST', url: '/api/backups/upload', payload: { type: 'folder', name: 'up2', data: data2 } })).statusCode).toBe(401);
+  });
 });

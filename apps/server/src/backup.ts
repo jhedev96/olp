@@ -33,7 +33,7 @@ export interface BackupSystem {
   mkdirp(dir: string): void;
   listDir(dir: string): string[];
   readFile(path: string): string | null;
-  writeFile(path: string, data: string, opts?: { mode?: number }): void;
+  writeFile(path: string, data: string | Buffer, opts?: { mode?: number }): void;
   /** Missing files resolve silently (delete parity). */
   removeFile(path: string): void;
   statFile(path: string): { size: number; mtime: number; isFile: boolean } | null;
@@ -54,6 +54,9 @@ export interface BackupOptions {
 
 /** Archive/DB operation timeout (120 s, Terwo parity). */
 const ARCHIVE_TIMEOUT_MS = 120000;
+
+/** Upload cap (50 MB, files-upload parity). */
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 /** Production system surface (real fs + `defaultExec`). */
 export function nodeBackupSys(): BackupSystem {
@@ -287,6 +290,29 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
     if (sys.statFile(full) === null) throw new Error('Backup file is missing');
     const sha256 = await hashStream(sys.streamFile(full));
     return { ok: true, sha256, match: meta.sha256 === undefined ? null : meta.sha256 === sha256 };
+  });
+
+  app.post('/api/backups/upload', { bodyLimit: UPLOAD_MAX_BYTES + 1024 * 1024 }, async (req) => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    if (!isBackupType(body['type'])) throw new Error('Invalid type');
+    const type = body['type'];
+    const raw = typeof body['data'] === 'string' ? body['data'] : '';
+    if (raw === '') throw new Error('Archive data is required');
+    const data = Buffer.from(raw, 'base64');
+    if (data.length > UPLOAD_MAX_BYTES) throw new Error('File too large (max 50 MB)');
+    const ext = type === 'folder' ? '.zip' : '.sql';
+    const name = sanitizeBackupName(body['name'], () => `upload-${backupStamp()}`);
+    sys.mkdirp(dir);
+    if (readMeta(sys, opts.dataDir, name) !== null) throw new Error('Backup name already taken');
+    const file = `${name}${ext}`;
+    sys.writeFile(join(dir, file), data);
+    const sha256 = await hashStream(sys.streamFile(join(dir, file)));
+    sys.writeFile(
+      metaPath(opts.dataDir, name),
+      JSON.stringify({ name, file, type, source: 'upload', created: now(), sha256 }, null, 2),
+      { mode: 0o600 },
+    );
+    return { ok: true, name };
   });
 
   app.get('/api/backups/:name/download', async (req, reply) => {
