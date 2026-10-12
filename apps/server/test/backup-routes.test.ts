@@ -251,6 +251,26 @@ describe('server backup routes', () => {
     expect(sys2.commands[0]?.cmd).toBe(`mysqldump -h 'h' -P '3306' -u 'u' 'appdb' > '${backupsOf(sys2, w2.dataDir)}/m2.sql'`);
   });
 
+  it('gzips dumps on request and restores through gunzip', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    const dir = backupsOf(sys, dataDir);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/backups',
+      headers: { cookie },
+      payload: { type: 'mysql', name: 'g1', source: 'appdb', gzip: true },
+    });
+    expect(created.json()).toEqual({ ok: true, name: 'g1' });
+    expect(sys.commands[0]?.cmd).toContain(`mysqldump -h 'h' -P '3306' -u 'u' --password='pw' 'appdb' | gzip > '${dir}/g1.sql.gz'`);
+    sys.files.set(join(dir, 'g1.sql.gz'), 'GZD');
+    const restored = await app.inject({ method: 'POST', url: '/api/backups/g1/restore', headers: { cookie }, payload: {} });
+    expect(restored.json()).toEqual({ ok: true });
+    expect(sys.commands.at(-1)?.cmd).toContain(`gzip -dc '${dir}/g1.sql.gz' | mysql `);
+  });
+
   it('downloads, deletes, and guards names', async () => {
     const { dataDir, legacyDir, root } = freshWorkspace();
     const sys = memorySys();

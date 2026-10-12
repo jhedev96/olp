@@ -185,12 +185,23 @@ export function hashStream(stream: NodeJS.ReadableStream & AsyncIterable<string 
   })();
 }
 
-function mysqlCommand(cfg: DbConfig, tool: 'mysqldump' | 'mysql', db: string, file: string, direction: '>' | '<'): string {
+function mysqlCommand(
+  cfg: DbConfig,
+  tool: 'mysqldump' | 'mysql',
+  db: string,
+  file: string | null,
+  direction: '>' | '<',
+): string {
   const pw = cfg.password === '' ? '' : ` --password=${quote(cfg.password)}`;
-  return (
-    `${tool} -h ${quote(cfg.host)} -P ${quote(cfg.port)} -u ${quote(cfg.user)}${pw} ` +
-    `${quote(db)} ${direction} ${quote(file)}`
-  );
+  const base =
+    `${tool} -h ${quote(cfg.host)} -P ${quote(cfg.port)} -u ${quote(cfg.user)}${pw} ` + `${quote(db)}`;
+  return file === null ? base : `${base} ${direction} ${quote(file)}`;
+}
+
+function pgCommand(cfg: DbConfig, tool: 'pg_dump' | 'psql', db: string, file: string | null, direction: '>' | '<'): string {
+  const base = `${tool} -h ${quote(cfg.host)} -p ${quote(cfg.port)} -U ${quote(cfg.user)} -d ${quote(db)}`;
+  const env = `PGPASSWORD=${quote(cfg.password)} `;
+  return file === null ? `${env}${base}` : `${env}${base} ${direction} ${quote(file)}`;
 }
 
 /**
@@ -238,17 +249,25 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
       if (dbName === '') throw new Error('Database name is required');
       const cfg = opts.dbConfig(type);
       source = dbName;
-      file = `${name}.sql`;
+      const gzip = body['gzip'] === true;
+      file = gzip ? `${name}.sql.gz` : `${name}.sql`;
       const dest = join(dir, file);
       if (type === 'mysql') {
         await mustBin(sys, 'mysqldump', 'mysqldump not found. Install mysql via the Store menu.');
-        await sys.exec(mysqlCommand(cfg, 'mysqldump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
+        if (gzip) {
+          await mustBin(sys, 'gzip', 'gzip not found.');
+          await sys.exec(`${mysqlCommand(cfg, 'mysqldump', dbName, null, '>')} | gzip > ${quote(dest)}`, ARCHIVE_TIMEOUT_MS);
+        } else {
+          await sys.exec(mysqlCommand(cfg, 'mysqldump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
+        }
       } else {
         await mustBin(sys, 'pg_dump', 'pg_dump not found. Install postgres via the Store menu.');
-        await sys.exec(
-          `PGPASSWORD=${quote(cfg.password)} pg_dump -h ${quote(cfg.host)} -p ${quote(cfg.port)} -U ${quote(cfg.user)} -d ${quote(dbName)} > ${quote(dest)}`,
-          ARCHIVE_TIMEOUT_MS,
-        );
+        if (gzip) {
+          await mustBin(sys, 'gzip', 'gzip not found.');
+          await sys.exec(`${pgCommand(cfg, 'pg_dump', dbName, null, '>')} | gzip > ${quote(dest)}`, ARCHIVE_TIMEOUT_MS);
+        } else {
+          await sys.exec(pgCommand(cfg, 'pg_dump', dbName, dest, '>'), ARCHIVE_TIMEOUT_MS);
+        }
       }
     }
     sys.writeFile(
@@ -309,13 +328,18 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
       await sys.exec(`unzip -o ${quote(full)} -d ${quote(target)}`, ARCHIVE_TIMEOUT_MS);
     } else {
       const cfg = opts.dbConfig(meta.type);
+      const gzipped = meta.file.endsWith('.sql.gz');
+      if (gzipped) await mustBin(sys, 'gzip', 'gzip not found.');
       if (meta.type === 'mysql') {
         await mustBin(sys, 'mysql', 'mysql not found. Install mysql via the Store menu.');
-        await sys.exec(mysqlCommand(cfg, 'mysql', meta.source, full, '<'), ARCHIVE_TIMEOUT_MS);
+        await sys.exec(
+          gzipped ? `gzip -dc ${quote(full)} | ${mysqlCommand(cfg, 'mysql', meta.source, null, '<')}` : mysqlCommand(cfg, 'mysql', meta.source, full, '<'),
+          ARCHIVE_TIMEOUT_MS,
+        );
       } else {
         await mustBin(sys, 'psql', 'psql not found. Install postgres via the Store menu.');
         await sys.exec(
-          `PGPASSWORD=${quote(cfg.password)} psql -h ${quote(cfg.host)} -p ${quote(cfg.port)} -U ${quote(cfg.user)} -d ${quote(meta.source)} < ${quote(full)}`,
+          gzipped ? `gzip -dc ${quote(full)} | ${pgCommand(cfg, 'psql', meta.source, null, '<')}` : pgCommand(cfg, 'psql', meta.source, full, '<'),
           ARCHIVE_TIMEOUT_MS,
         );
       }
