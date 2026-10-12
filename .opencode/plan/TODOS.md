@@ -128,9 +128,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 15 — Cron insights wave 5 (dry-run, run-now, stats, spec approved 2026-10-12)
 
-- [~] W5-00 planning: spec + tasks + todos (`SPECS/spec-cron-wave.md`, `TASKS/phase-15-cron-wave.md`)
-- [ ] W5-01 schedule parser + run store + tests
-- [ ] W5-02 backend runCommand + routes + inject tests
-- [ ] W5-03 smoke extension + live ALL GREEN
-- [ ] W5-04 frontend wiring
-- [ ] W5-05 docs + CAND-028 close-out
+- [x] W5-00 planning: spec + tasks + todos (`SPECS/spec-cron-wave.md`, `TASKS/phase-15-cron-wave.md`)
+- [x] W5-01 schedule parser + run store + tests
+- [x] W5-02 backend runCommand + routes + inject tests
+- [x] W5-03 smoke extension + live ALL GREEN
+- [x] W5-04 frontend wiring
+- [x] W5-05 docs + CAND-028 close-out

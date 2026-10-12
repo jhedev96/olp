@@ -33,6 +33,10 @@ Termux/Alpine/macOS hardware.
   `GET .../ddl` (exact DDL or exact columns); page wired (dialog,
   badges, DDL modal, data-vs-index). No live-DB gate in agent box —
   human proof against real engines required before release.
+- Cron wave 5: `GET /api/cron/jobs` gains `nextRun`, `POST :id/run`
+  (stored-command-only, captured, persisted), `GET /runs`,
+  `POST /jobs/dry-run`, `GET /daemon`; page wired (countdown, modal,
+  stats footnoted panel-only, battery card). Smoke 43/43 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
