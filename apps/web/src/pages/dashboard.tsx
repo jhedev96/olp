@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { apiJson } from '../lib/api.js';
+import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize, fmtUptime } from '../lib/format.js';
 import { navigateTo } from '../lib/router.js';
 import { Badge } from '../components/common/Badge.js';
@@ -26,6 +26,14 @@ export interface DashSite {
   path: string;
   port: number;
   running: boolean;
+}
+
+/** `/api/services` row shape. */
+export interface DashDaemon {
+  id: string;
+  name: string;
+  port: number | null;
+  active: boolean;
 }
 
 /** `/api/install` item shape (subset used by the store preview). */
@@ -60,18 +68,20 @@ function StatCard({ label, value, sub, bar }: { label: string; value: string; su
 /**
  * Dashboard (mockup dashboard parity): live system cards, filterable
  * site table with paths and open-links, store preview with install
- * shortcuts, conditional telegram card, and tracked dummies. Poll
- * failures keep the previous render (never blank) and clean up on
- * unmount. Hero pills for PM2/arch/wakelock and card extras (CPU temp,
- * per-core freq, ZRAM, FS type, battery thermal, per-site memory) have
- * no source and stay out (CAND-014/015); restart-panel ships disabled
- * (CAND-015); services (CAND-005) and log tail (CAND-013) are
- * Coming-Soon sections.
+ * shortcuts, conditional telegram card, live daemon section (ACTIVE
+ * badges + best-effort START), and one tracked dummy (log tail
+ * CAND-013). Poll failures keep the previous render (never blank) and
+ * clean up on unmount. Hero pills for PM2/arch/wakelock and card
+ * extras (CPU temp, per-core freq, ZRAM, FS type, battery thermal,
+ * per-site memory) have no source and stay out (CAND-014/015);
+ * restart-panel ships disabled (CAND-015).
  */
 export function DashboardPage(): ReactElement {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [sites, setSites] = useState<DashSite[]>([]);
   const [store, setStore] = useState<DashStoreItem[] | null>(null);
+  const [daemons, setDaemons] = useState<DashDaemon[]>([]);
+  const [daemonError, setDaemonError] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
   const [telegramOn, setTelegramOn] = useState(false);
 
@@ -126,6 +136,30 @@ export function DashboardPage(): ReactElement {
       : { value: '—', sub: stats !== null && 'error' in stats.battery ? stats.battery.error : '' };
 
   const siteHost = typeof window === 'undefined' ? '' : window.location.hostname;
+
+  const loadDaemons = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ services: DashDaemon[] }>('/api/services');
+      if (Array.isArray(body.services)) setDaemons(body.services);
+    } catch {
+      // section keeps the previous render on failure
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDaemons();
+  }, [loadDaemons]);
+
+  const startDaemon = async (id: string): Promise<void> => {
+    setDaemonError('');
+    try {
+      const body = await apiJson<{ ok?: unknown; error?: string }>(`/api/services/${id}/start`, { method: 'POST' });
+      if (body.ok === true) await loadDaemons();
+      else setDaemonError(typeof body.error === 'string' ? body.error : 'Failed to start');
+    } catch (err) {
+      setDaemonError(err instanceof ApiError ? err.message : 'Failed to start');
+    }
+  };
   const siteTypes = ['all', ...Array.from(new Set(sites.map((s) => s.type)))];
   const visibleSites = siteFilter === 'all' ? sites : sites.filter((s) => s.type === siteFilter);
 
@@ -236,7 +270,31 @@ export function DashboardPage(): ReactElement {
           )}
         </Card>
         <div className="flex flex-col gap-3">
-          <ComingSoon feature="Services & Daemons" candidate="CAND-005" />
+          <Card>
+            <h2 className="mb-2 font-bold">Services & Daemons</h2>
+            {daemonError !== '' && (
+              <p role="alert" className="mb-2 text-sm text-red-400">
+                {daemonError}
+              </p>
+            )}
+            <ul className="flex flex-col gap-2">
+              {daemons.map((daemon) => (
+                <li key={daemon.id} className="flex items-center gap-2 text-sm">
+                  <span className="mr-auto">
+                    {daemon.name}
+                    {daemon.port !== null && <span className="ml-2 font-mono text-xs text-neutral-500">:{daemon.port}</span>}
+                  </span>
+                  {daemon.active ? (
+                    <Badge tone="success">Active</Badge>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => void startDaemon(daemon.id)}>
+                      Start
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
           <ComingSoon feature="Panel log tail" candidate="CAND-013" />
           {telegramOn && (
             <Card>
