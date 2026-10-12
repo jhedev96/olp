@@ -95,7 +95,50 @@ const run = json('POST', `/api/cron/jobs/${echoId}/run`, {});
 check('cron run-now ok', run.ok === true && run.run.exitCode === 0 && run.run.output.includes('smoke-run-123'));
 check('cron runs feed', json('GET', '/api/cron/runs?limit=10').runs.some((r) => r.jobId === echoId));
 check('cron job deleted', json('DELETE', `/api/cron/jobs/${echoId}`).ok === true);
-check('backup zip hint honest', json('POST', '/api/backups', { type: 'folder', name: 'x', source: 'smoke' }).error.includes('zip'));
+const zipProbe = json('POST', '/api/backups', { type: 'folder', name: 'x', source: 'smoke' });
+check(
+  'backup zip hint honest',
+  zipProbe.ok === true
+    ? json('DELETE', '/api/backups/x').ok === true
+    : typeof zipProbe.error === 'string' && zipProbe.error.includes('zip'),
+);
+
+// backup advanced wave 6 (hash, upload, schedules — needs real zip)
+const zipOk = execSync('command -v zip >/dev/null 2>&1 && echo yes || echo no', { encoding: 'utf8' }).trim() === 'yes';
+if (zipOk) {
+  check('backup create ok', json('POST', '/api/backups', { type: 'folder', name: 'smoke-full', source: 'smoke' }).ok === true);
+  const verify = json('GET', '/api/backups/smoke-full/verify');
+  check('backup verify match', verify.ok === true && verify.match === true && /^[0-9a-f]{64}$/.test(verify.sha256));
+  const roundTrip = (() => {
+    const raw = execSync(`curl -s -b ${cj} ${BASE}/api/backups/smoke-full/download | base64 -w0`, { encoding: 'utf8' }).trim();
+    return json('POST', '/api/backups/upload', { type: 'folder', name: 'smoke-copy', data: raw });
+  })();
+  check('backup upload round-trip', roundTrip.ok === true);
+  check('backup uploaded verifies', json('GET', '/api/backups/smoke-copy/verify').match === true);
+  const sched = json('POST', '/api/backups/schedules', { name: 'smoke-nightly', type: 'folder', source: 'smoke', schedule: '* * * * *' });
+  check('backup schedule created', sched.ok === true);
+  const schedId = sched.schedule.id;
+  let fired = false;
+  for (let i = 0; i < 18; i++) {
+    execSync('sleep 5');
+    const current = json('GET', '/api/backups/schedules');
+    const row = current.schedules.find((s) => s.id === schedId);
+    if (row !== undefined && row.lastRun !== null) {
+      fired = row.lastStatus === 'ok';
+      break;
+    }
+  }
+  check('backup schedule fired', fired);
+  check('backup schedule deleted', json('DELETE', `/api/backups/schedules/${schedId}`).ok === true);
+  for (const b of json('GET', '/api/backups').backups) {
+    if (typeof b.name === 'string' && b.name.startsWith('smoke-')) {
+      json('DELETE', `/api/backups/${b.name}`);
+    }
+  }
+  check('backup slates clean', json('GET', '/api/backups').backups.length === 0);
+} else {
+  console.log('SKIP backup advanced (zip missing)');
+}
 
 // monitor wave 1 (read-only telemetry)
 check('monitor summary 401', execSync(`curl -s -o /dev/null -w '%{http_code}' ${BASE}/api/monitor/summary`, { encoding: 'utf8' }) === '401');
