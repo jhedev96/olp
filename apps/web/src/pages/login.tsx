@@ -54,6 +54,7 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
   });
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [theme, setThemeState] = useState(getTheme);
@@ -108,7 +109,7 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username, password, remember }),
         },
         { unauthorized: 'rethrow' },
       );
@@ -215,8 +216,8 @@ export function LoginPage({ goto }: { goto?: (url: string) => void } = {}): Reac
                     <i data-lucide="x" className="h-4 w-4" />
                   </Button>
                 </div>
-                <label className="flex items-center gap-2 text-xs text-neutral-400" title="Coming soon (CAND-031)">
-                  <input type="checkbox" disabled={true} />
+                <label className="flex items-center gap-2 text-xs text-neutral-400" title="30-day session instead of 24 hours">
+                  <input type="checkbox" checked={remember} onChange={(ev) => setRemember(ev.target.checked)} />
                   Remember session (30-day cookie)
                 </label>
                 <Button type="submit" className="w-full" disabled={busy}>
