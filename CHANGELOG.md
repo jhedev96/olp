@@ -37,6 +37,10 @@ Termux/Alpine/macOS hardware.
   (stored-command-only, captured, persisted), `GET /runs`,
   `POST /jobs/dry-run`, `GET /daemon`; page wired (countdown, modal,
   stats footnoted panel-only, battery card). Smoke 43/43 on Linux.
+- Backup wave 6: sidecar SHA256 + verify endpoint, gzip dump variant,
+  archive upload import, scheduled snapshots with ticker; page wired
+  (badges, toggle, upload, schedules). Full-system bundle splits to
+  CAND-035. Smoke 49/49 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

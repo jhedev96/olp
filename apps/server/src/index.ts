@@ -21,7 +21,7 @@ import { fileProxyStore, nodeProxySys, registerProxyRoutes } from './proxy.js';
 import type { ProxyStore, ProxySystem } from './proxy.js';
 import { fileRegistry, mysqlDriver, normalizeConfig, pgDriver, registerDatabaseRoutes } from './database.js';
 import type { DbConfig, DbDriver, DbEngine, DbRegistry } from './database.js';
-import { nodeBackupSys, registerBackupRoutes } from './backup.js';
+import { nodeBackupSys, registerBackupRoutes, startBackupScheduler } from './backup.js';
 import type { BackupSystem } from './backup.js';
 import { nodeCronBackend, registerCronRoutes } from './cron.js';
 import type { CronBackend } from './cron.js';
@@ -139,6 +139,13 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     root,
     sys: opts.backupSys ?? nodeBackupSys(),
     dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
+  });
+  startBackupScheduler({
+    sys: opts.backupSys ?? nodeBackupSys(),
+    dataDir: auth.dataDir,
+    root,
+    dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
+    now: () => Date.now(),
   });
   registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend(), runsPath: join(dataDir, 'cron-runs.json') });
   const settingsStore = opts.settingsStore ?? fileSettingsStore(auth.dataDir);

@@ -8,6 +8,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
+import { hashStream } from '../src/backup.js';
 import { sanitizeBackupName } from '../src/backup.js';
 import type { BackupSystem } from '../src/backup.js';
 import type { DbConfig } from '../src/database.js';
@@ -250,6 +251,26 @@ describe('server backup routes', () => {
     expect(sys2.commands[0]?.cmd).toBe(`mysqldump -h 'h' -P '3306' -u 'u' 'appdb' > '${backupsOf(sys2, w2.dataDir)}/m2.sql'`);
   });
 
+  it('gzips dumps on request and restores through gunzip', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    const dir = backupsOf(sys, dataDir);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/backups',
+      headers: { cookie },
+      payload: { type: 'mysql', name: 'g1', source: 'appdb', gzip: true },
+    });
+    expect(created.json()).toEqual({ ok: true, name: 'g1' });
+    expect(sys.commands[0]?.cmd).toContain(`mysqldump -h 'h' -P '3306' -u 'u' --password='pw' 'appdb' | gzip > '${dir}/g1.sql.gz'`);
+    sys.files.set(join(dir, 'g1.sql.gz'), 'GZD');
+    const restored = await app.inject({ method: 'POST', url: '/api/backups/g1/restore', headers: { cookie }, payload: {} });
+    expect(restored.json()).toEqual({ ok: true });
+    expect(sys.commands.at(-1)?.cmd).toContain(`gzip -dc '${dir}/g1.sql.gz' | mysql `);
+  });
+
   it('downloads, deletes, and guards names', async () => {
     const { dataDir, legacyDir, root } = freshWorkspace();
     const sys = memorySys();
@@ -338,5 +359,125 @@ describe('server backup routes', () => {
     const res = await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } });
     expect(res.json().backups.map((b: { name: string }) => b.name)).toEqual(['new', 'old']);
     expect(res.json().backups[0]).toMatchObject({ file: 'new.zip', size: 2 });
+  });
+
+  it('hashes streams to known vectors', async () => {
+    expect(await hashStream(Readable.from(['abc']))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(await hashStream(Readable.from([]))).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  });
+
+  it('stores hashes at create and verifies them', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    sys.dirs.add(join(root, 'proj'));
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    // Fake exec never materializes the archive: pre-seed it so the stored hash covers real bytes.
+    sys.files.set(join(backupsOf(sys, dataDir), 'h1.zip'), 'ZIPDATA');
+    await app.inject({ method: 'POST', url: '/api/backups', headers: { cookie }, payload: { type: 'folder', name: 'h1', source: 'proj' } });
+    const sidecar = JSON.parse(sys.files.get(join(backupsOf(sys, dataDir), 'h1.json')) ?? '');
+    expect(typeof sidecar.sha256).toBe('string');
+    expect(sidecar.sha256).toHaveLength(64);
+    const verify = await app.inject({ method: 'GET', url: '/api/backups/h1/verify', headers: { cookie } });
+    expect(verify.json()).toEqual({ ok: true, sha256: sidecar.sha256, match: true });
+    expect((await app.inject({ method: 'GET', url: '/api/backups/nope/verify', headers: { cookie } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/backups/h1/verify' })).statusCode).toBe(401);
+  });
+
+  it('verifies pre-hash sidecars as unknown', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    sys.files.set(join(backupsOf(sys, dataDir), 'old.json'), JSON.stringify({ name: 'old', file: 'old.zip', type: 'folder', source: 'b', created: 1 }));
+    sys.files.set(join(backupsOf(sys, dataDir), 'old.zip'), 'x');
+    const verify = await app.inject({ method: 'GET', url: '/api/backups/old/verify', headers: { cookie } });
+    expect(verify.json()).toMatchObject({ ok: true, match: null });
+    expect(typeof verify.json().sha256).toBe('string');
+  });
+
+  it('imports uploads with validation and round-trips restore', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    const upload = (payload: unknown) =>
+      app.inject({ method: 'POST', url: '/api/backups/upload', headers: { cookie }, payload });
+    expect((await upload({ type: 'dvd', data: 'eA==' })).json().error).toBe('Invalid type');
+    expect((await upload({ type: 'folder' })).json().error).toBe('Archive data is required');
+    const data = Buffer.from('UPLOADDATA').toString('base64');
+    const ok = await upload({ type: 'folder', name: 'up1', data });
+    expect(ok.json()).toEqual({ ok: true, name: 'up1' });
+    expect((await upload({ type: 'folder', name: 'up1', data })).json().error).toBe('Backup name already taken');
+    const list = await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } });
+    expect(list.json().backups).toMatchObject([{ name: 'up1', file: 'up1.zip', source: 'upload' }]);
+    const verify = await app.inject({ method: 'GET', url: '/api/backups/up1/verify', headers: { cookie } });
+    expect(verify.json()).toMatchObject({ ok: true, match: true });
+    sys.dirs.add(join(root, 'restored'));
+    const restored = await app.inject({ method: 'POST', url: '/api/backups/up1/restore', headers: { cookie }, payload: { targetPath: 'restored' } });
+    expect(restored.json()).toEqual({ ok: true });
+    const data2 = Buffer.from('UPLOADDATA').toString('base64');
+    expect((await app.inject({ method: 'POST', url: '/api/backups/upload', payload: { type: 'folder', name: 'up2', data: data2 } })).statusCode).toBe(401);
+  });
+
+  it('manages schedules with validation and toggle', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = memorySys();
+    const { app } = buildServer({ dataDir, legacyDir, env: fakeEnv, sysDeps: quietDeps(), root, backupSys: sys, backupDbConfig: dbConfig('pw') });
+    const cookie = await authedCookie(app);
+    const post = (payload: unknown) => app.inject({ method: 'POST', url: '/api/backups/schedules', headers: { cookie }, payload });
+    expect((await post({ type: 'dvd', schedule: '* * * * *', source: 'x' })).json().error).toBe('Invalid type');
+    expect((await post({ type: 'folder', schedule: 'nonsense', source: 'x' })).json().error).toBe('Invalid schedule (5 cron fields required)');
+    expect((await post({ type: 'folder', schedule: '* * * * *', source: '' })).json().error).toBe('Source is required');
+    const created = await post({ type: 'folder', name: 'night', schedule: '* * * * *', source: 'proj' });
+    expect(created.json().ok).toBe(true);
+    const sid = (created.json().schedule as { id: string }).id;
+    const list = await app.inject({ method: 'GET', url: '/api/backups/schedules', headers: { cookie } });
+    expect(list.json().schedules).toMatchObject([{ name: 'night', enabled: true, lastRun: null }]);
+    expect(typeof list.json().schedules[0].nextRun).toBe('number');
+    const toggled = await app.inject({ method: 'POST', url: `/api/backups/schedules/${sid}/toggle`, headers: { cookie } });
+    expect(toggled.json()).toEqual({ ok: true });
+    const unknown = await app.inject({ method: 'POST', url: '/api/backups/schedules/zz/toggle', headers: { cookie } });
+    expect(unknown.statusCode).toBe(404);
+    const deleted = await app.inject({ method: 'DELETE', url: `/api/backups/schedules/${sid}`, headers: { cookie } });
+    expect(deleted.json()).toEqual({ ok: true });
+    expect((await app.inject({ method: 'GET', url: '/api/backups/schedules' })).statusCode).toBe(401);
+  });
+
+  it('ticks due schedules and records failures', async () => {
+    const { dueSchedules, readSchedules, runDueBackups } = await import('../src/backup.js');
+    const { dataDir, root } = freshWorkspace();
+    const sys = memorySys();
+    sys.dirs.add(join(root, 'proj'));
+    const deps = { sys, dataDir, root, dbConfig: dbConfig('pw'), now: () => 1728470400000 };
+    expect(dueSchedules([], 1728470400000)).toEqual([]);
+    expect(
+      dueSchedules(
+        [{ id: 'a', name: 'n', type: 'folder', source: 'proj', schedule: '* * * * *', enabled: false, created: 0, lastRun: null, lastStatus: null }],
+        1728470400000,
+      ),
+    ).toEqual([]);
+    sys.writeFile(
+      join(backupsOf(sys, dataDir), 'backup-schedules.json'),
+      JSON.stringify([
+        { id: 's1', name: 'night', type: 'folder', source: 'proj', schedule: '* * * * *', enabled: true, created: 0, lastRun: null, lastStatus: null },
+      ]),
+      { mode: 0o600 },
+    );
+    await runDueBackups(deps, 1728470400000);
+    const after = readSchedules(sys, dataDir);
+    expect(after).toMatchObject([{ id: 's1', lastRun: 1728470400000, lastStatus: 'ok' }]);
+    const w2 = freshWorkspace();
+    const missing = memorySys({ zip: false });
+    missing.dirs.add(join(w2.root, 'proj'));
+    missing.writeFile(
+      join(backupsOf(missing, w2.dataDir), 'backup-schedules.json'),
+      JSON.stringify([
+        { id: 's1', name: 'night', type: 'folder', source: 'proj', schedule: '* * * * *', enabled: true, created: 0, lastRun: null, lastStatus: null },
+      ]),
+      { mode: 0o600 },
+    );
+    await runDueBackups({ sys: missing, dataDir: w2.dataDir, root: w2.root, dbConfig: dbConfig('pw'), now: () => 1728470400000 });
+    expect(readSchedules(missing, w2.dataDir)[0]).toMatchObject({ id: 's1', lastStatus: expect.stringContaining('zip') });
   });
 });
