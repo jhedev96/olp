@@ -13,8 +13,10 @@ import {
   sessionTokenFromHeader,
   verifyCredentials,
 } from '@olp/auth';
-import type { AuthConfig, SessionMeta } from '@olp/auth';
+import type { AuthConfig, PasskeyCredential, SessionMeta } from '@olp/auth';
 import { REMEMBER_MAX_AGE, REMEMBER_TTL_MS } from '@olp/auth';
+import { ChallengeMap, nodePasskeyOps } from './passkey.js';
+import type { PasskeyOps } from './passkey.js';
 
 /** Resolved credential directories. */
 export interface ServerDirs {
@@ -41,13 +43,21 @@ export interface AuthContext {
   dataDir: string;
   created: boolean;
   plaintextPassword?: string;
+  /** WebAuthn ceremony adapter (fake in tests — no authenticator in CI). */
+  passkeys: PasskeyOps;
+  /** Pending-ceremony challenges (memory-only, like sessions). */
+  challenges: ChallengeMap;
 }
 
 /**
  * Load (or generate/migrate) credentials and create the session store.
  * Pure besides `loadConfig` file I/O.
  */
-export function createAuthContext(dataDir: string, legacyDir: string): AuthContext {
+export function createAuthContext(
+  dataDir: string,
+  legacyDir: string,
+  opts: { passkeyOps?: PasskeyOps } = {},
+): AuthContext {
   const loaded = loadConfig(dataDir, { legacyDir });
   return {
     config: loaded.config,
@@ -55,6 +65,8 @@ export function createAuthContext(dataDir: string, legacyDir: string): AuthConte
     dataDir,
     created: loaded.created,
     plaintextPassword: loaded.plaintextPassword,
+    passkeys: opts.passkeyOps ?? nodePasskeyOps(),
+    challenges: new ChallengeMap(),
   };
 }
 
@@ -63,6 +75,11 @@ function isPublicRoute(path: string, method: string): boolean {
   if (path === '/healthz') return true;
   if (method === 'GET' && path === '/api/health') return true;
   if (method === 'POST' && path === '/api/login') return true;
+  // Passkey login ceremony is public by design (it MINTS sessions);
+  // registration stays gated (only authed users enroll keys).
+  if (method === 'POST' && (path === '/api/auth/passkey/login/options' || path === '/api/auth/passkey/login/verify')) {
+    return true;
+  }
   return false;
 }
 
@@ -96,6 +113,21 @@ interface ChangePasswordBody {
   currentPassword?: unknown;
   newPassword?: unknown;
   confirmPassword?: unknown;
+}
+
+/** Error text cap for ceremony failures (lib messages stay readable, never full dumps). */
+const CEREMONY_ERROR_MAX = 200;
+
+function ceremonyError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const first = message.split('\n')[0] ?? '';
+  return first === '' ? 'Passkey ceremony failed' : first.slice(0, CEREMONY_ERROR_MAX);
+}
+
+/** RP identity from the request (no proxy in front — direct values only). */
+function rpOf(req: Pick<FastifyRequest, 'hostname' | 'protocol'>): { rpId: string; origin: string } {
+  const rpId = req.hostname;
+  return { rpId, origin: `${req.protocol}://${rpId}` };
 }
 
 /**
@@ -195,5 +227,115 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
     // orphaned cookie is cleared so the client lands on login.
     if (result.self) reply.header('Set-Cookie', clearCookie());
     return { ok: true, self: result.self };
+  });
+
+  app.post('/api/auth/passkey/register/options', async (req) => {
+    const { rpId } = rpOf(req);
+    const { options, challenge } = await ctx.passkeys.registrationOptions({
+      username: ctx.config.username,
+      rpId,
+      excludeIds: ctx.config.passkeys.map((k) => k.id),
+    });
+    return { options, state: ctx.challenges.issue(challenge) };
+  });
+
+  app.post('/api/auth/passkey/register/verify', { bodyLimit: 1048576 }, async (req, reply) => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    const challenge = ctx.challenges.take(typeof body['state'] === 'string' ? body['state'] : '');
+    if (challenge === null) {
+      reply.code(400);
+      return { error: 'Expired or unknown ceremony' };
+    }
+    const { rpId, origin } = rpOf(req);
+    try {
+      const verified = await ctx.passkeys.verifyRegistration({
+        response: body['response'],
+        challenge,
+        origin,
+        rpId,
+      });
+      const name = typeof body['name'] === 'string' ? body['name'].trim().slice(0, 40) : '';
+      const row: PasskeyCredential = {
+        id: verified.id,
+        publicKey: verified.publicKey,
+        counter: verified.counter,
+        name,
+        created: Date.now(),
+      };
+      const existing = ctx.config.passkeys.findIndex((k) => k.id === row.id);
+      if (existing === -1) ctx.config.passkeys.push(row);
+      else ctx.config.passkeys[existing] = row;
+      saveConfig(ctx.dataDir, ctx.config);
+      return { ok: true, id: row.id };
+    } catch (err) {
+      reply.code(400);
+      return { error: ceremonyError(err) };
+    }
+  });
+
+  app.get('/api/auth/passkeys', async () => ({
+    passkeys: ctx.config.passkeys.map((k) => ({ id: k.id, name: k.name, created: k.created })),
+  }));
+
+  app.delete('/api/auth/passkeys/:id', async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const index = ctx.config.passkeys.findIndex((k) => k.id === id);
+    if (index === -1) {
+      reply.code(404);
+      return { error: 'Unknown passkey' };
+    }
+    ctx.config.passkeys.splice(index, 1);
+    saveConfig(ctx.dataDir, ctx.config);
+    return { ok: true };
+  });
+
+  app.post('/api/auth/passkey/login/options', { bodyLimit: 1048576 }, async (req, reply) => {
+    if (ctx.config.passkeys.length === 0) {
+      reply.code(400);
+      return { error: 'No passkeys registered' };
+    }
+    const { rpId } = rpOf(req);
+    const { options, challenge } = await ctx.passkeys.authenticationOptions({
+      allowIds: ctx.config.passkeys.map((k) => k.id),
+      rpId,
+    });
+    return { options, state: ctx.challenges.issue(challenge) };
+  });
+
+  app.post('/api/auth/passkey/login/verify', { bodyLimit: 1048576 }, async (req, reply) => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    const challenge = ctx.challenges.take(typeof body['state'] === 'string' ? body['state'] : '');
+    if (challenge === null) {
+      reply.code(400);
+      return { error: 'Expired or unknown ceremony' };
+    }
+    const response = body['response'];
+    const responseId = typeof response === 'object' && response !== null
+      ? (response as Record<string, unknown>)['id']
+      : undefined;
+    const credential = ctx.config.passkeys.find((k) => k.id === responseId);
+    if (credential === undefined) {
+      reply.code(401);
+      return { error: 'Unknown credential' };
+    }
+    const { rpId, origin } = rpOf(req);
+    try {
+      const { counter } = await ctx.passkeys.verifyAuthentication({
+        response,
+        challenge,
+        origin,
+        rpId,
+        credential: { id: credential.id, publicKey: credential.publicKey, counter: credential.counter },
+      });
+      credential.counter = counter;
+      saveConfig(ctx.dataDir, ctx.config);
+    } catch {
+      reply.code(401);
+      return { error: 'Passkey verification failed' };
+    }
+    // Passkey sessions are always 24h (remember-me stays a password-login feature).
+    reply.header('Set-Cookie', loginCookie(ctx.store.create(requestMeta(req))));
+    return { ok: true };
   });
 }
