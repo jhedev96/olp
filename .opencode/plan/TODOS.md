@@ -134,3 +134,14 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W5-03 smoke extension + live ALL GREEN
 - [x] W5-04 frontend wiring
 - [x] W5-05 docs + CAND-028 close-out
+
+## Phase 16 — Backup advanced wave 6 (verify, gzip, upload, schedules; spec approved 2026-10-12)
+
+- [~] W6-00 planning: spec + tasks + todos (`SPECS/spec-backup-wave.md`, `TASKS/phase-16-backup-wave.md`)
+- [ ] W6-01 sha256 sidecar + verify endpoint + tests
+- [ ] W6-02 gzip dump variant + tests
+- [ ] W6-03 upload import + tests
+- [ ] W6-04 schedules CRUD + ticker + tests
+- [ ] W6-05 smoke extension + live ALL GREEN
+- [ ] W6-06 frontend wiring
+- [ ] W6-07 docs + CAND-029 close + CAND-035 open
