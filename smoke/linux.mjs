@@ -90,6 +90,14 @@ check('monitor summary shape', typeof summary.hostname === 'string' && typeof su
 const procs = json('GET', '/api/monitor/processes?limit=5');
 check('monitor processes shape', Array.isArray(procs.processes) && procs.processes.length > 0 && procs.processes.length <= 5 && typeof procs.processes[0].pid === 'number' && 'pm2' in procs && typeof procs.truncated === 'boolean');
 
+// daemon status wave 3 (presence + best-effort control)
+check('services 401', execSync(`curl -s -o /dev/null -w '%{http_code}' ${BASE}/api/services`, { encoding: 'utf8' }) === '401');
+const services = json('GET', '/api/services');
+check('services shape', Array.isArray(services.services) && services.services.length === 4 && services.services.every((s) => typeof s.id === 'string' && typeof s.active === 'boolean'));
+const startAttempt = json('POST', '/api/services/postgres/start', {});
+check('services start honest', startAttempt.ok === true || typeof startAttempt.error === 'string');
+check('services unknown 404', json('POST', '/api/services/ntsysv/start', {}).error === 'Unknown service');
+
 // monitor kill (privileged wave 2, same-box sleep victim)
 check('monitor kill 401', execSync(`curl -s -o /dev/null -w '%{http_code}' -X POST ${BASE}/api/monitor/processes/1/kill -H 'Content-Type: application/json' -d '{}'`, { encoding: 'utf8' }) === '401');
 check('monitor kill denies init', json('POST', '/api/monitor/processes/1/kill', {}).error === 'Refusing to kill init');
