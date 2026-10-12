@@ -81,6 +81,20 @@ check('settings save', json('POST', '/api/settings', { telegram: { enabled: fals
 check('store list has nginx', json('GET', '/api/install').items.some((i) => i.id === 'nginx'));
 check('proxy list empty', Array.isArray(json('GET', '/api/nginx/proxies').proxies));
 check('cron stopped here', json('GET', '/api/cron/status').running === false);
+
+// cron insights wave 5 (real echo job lifecycle, deleted after)
+check('cron daemon shape', (() => { const d = json('GET', '/api/cron/daemon'); return typeof d.running === 'boolean' && (d.pid === null || Number.isInteger(d.pid)); })());
+const echoJob = json('POST', '/api/cron/jobs', { name: 'smoke-echo', schedule: '* * * * *', command: 'echo smoke-run-123' });
+check('cron job created', echoJob.ok === true);
+if (!echoJob.ok) throw new Error(`cron backend unavailable, aborting smoke: ${echoJob.error ?? 'unknown'}`);
+const echoId = echoJob.job.id;
+const dry = json('POST', '/api/cron/jobs/dry-run', {});
+const dryRow = dry.results.find((r) => r.id === echoId);
+check('cron dry-run ok', dryRow !== undefined && dryRow.ok === true && typeof dryRow.nextRun === 'number');
+const run = json('POST', `/api/cron/jobs/${echoId}/run`, {});
+check('cron run-now ok', run.ok === true && run.run.exitCode === 0 && run.run.output.includes('smoke-run-123'));
+check('cron runs feed', json('GET', '/api/cron/runs?limit=10').runs.some((r) => r.jobId === echoId));
+check('cron job deleted', json('DELETE', `/api/cron/jobs/${echoId}`).ok === true);
 check('backup zip hint honest', json('POST', '/api/backups', { type: 'folder', name: 'x', source: 'smoke' }).error.includes('zip'));
 
 // monitor wave 1 (read-only telemetry)
@@ -103,9 +117,16 @@ check('monitor kill 401', execSync(`curl -s -o /dev/null -w '%{http_code}' -X PO
 check('monitor kill denies init', json('POST', '/api/monitor/processes/1/kill', {}).error === 'Refusing to kill init');
 const sleeper = execSync('sleep 300 >/dev/null 2>&1 & echo $!', { encoding: 'utf8' }).trim();
 check('monitor kill TERM', json('POST', `/api/monitor/processes/${sleeper}/kill`, {}).ok === true);
+// Gone = pid vanished, or lingering as an unreaped zombie (kill -0
+// succeeds on zombies; the victim is plain `sleep`, so field 3 is safe).
 let gone = false;
 try {
   execSync(`kill -0 ${sleeper}`);
+  try {
+    gone = execSync(`cut -d' ' -f3 /proc/${sleeper}/stat`, { encoding: 'utf8' }).trim() === 'Z';
+  } catch {
+    gone = true;
+  }
 } catch {
   gone = true;
 }
