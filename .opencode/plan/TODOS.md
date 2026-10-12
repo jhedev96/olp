@@ -163,3 +163,12 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W8-03 smoke extension + live ALL GREEN
 - [x] W8-04 frontend wiring
 - [x] W8-05 docs + CAND-030 close
+
+## Phase 19 — Server config wave 9 (remember-me, badge, bind, drop; spec approved 2026-10-12)
+
+- [~] W9-00 planning: spec + tasks + todos (`SPECS/spec-server-config-wave.md`, `TASKS/phase-19-server-config-wave.md`)
+- [ ] W9-01 auth per-session TTL + cookie age + tests
+- [ ] W9-02 server remember/getMe/bind/identity + tests
+- [ ] W9-03 smoke extension + live ALL GREEN
+- [ ] W9-04 frontend wiring
+- [ ] W9-05 docs + CAND-031 close + CAND-037 open
