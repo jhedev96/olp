@@ -14,6 +14,8 @@ export interface TelegramUpdate {
 export interface TelegramApi {
   sendMessage(botToken: string, chatId: string, text: string): Promise<void>;
   getUpdates(botToken: string, offset: number, timeoutSec: number): Promise<TelegramUpdate[]>;
+  /** Bot username for the verified badge (throws on bad shape). */
+  getMe(botToken: string): Promise<string>;
 }
 
 const API_HOST = 'api.telegram.org';
@@ -114,6 +116,15 @@ export function nodeTelegramApi(): TelegramApi {
       const obj = assertOk(parsed, 'API failed');
       if (!Array.isArray(obj['result'])) throw new Error('Invalid response');
       return obj['result'] as TelegramUpdate[];
+    },
+    getMe: async (botToken) => {
+      const parsed = await getJson(API_HOST, `/bot${botToken}/getMe`);
+      const obj = assertOk(parsed, 'API failed');
+      const result = obj['result'];
+      if (typeof result !== 'object' || result === null) throw new Error('Invalid response');
+      const username = (result as Record<string, unknown>)['username'];
+      if (typeof username !== 'string' || username === '') throw new Error('Invalid response');
+      return username;
     },
   };
 }
