@@ -28,6 +28,11 @@ Termux/Alpine/macOS hardware.
 - Daemon wave 3: `GET /api/services` (presence-based ACTIVE per
   daemon) + `POST /api/services/:id/start` (best-effort control,
   honest errors); dashboard section wired. Smoke 36/36 on Linux.
+- Database wave 4: `POST /api/db/:engine/databases` (validated
+  create, 409/403 mapping), `GET .../schema` (rows/sizes) +
+  `GET .../ddl` (exact DDL or exact columns); page wired (dialog,
+  badges, DDL modal, data-vs-index). No live-DB gate in agent box —
+  human proof against real engines required before release.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

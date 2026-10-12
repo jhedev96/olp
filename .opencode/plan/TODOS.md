@@ -119,9 +119,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 14 — Database wave 4 (create + schema info, spec approved 2026-10-12)
 
-- [~] W4-00 planning: spec + tasks + todos (`SPECS/spec-database-wave.md`, `TASKS/phase-14-database-wave.md`)
-- [ ] W4-01 driver methods (create/stats/def ×2 engines)
-- [ ] W4-02 routes + fake-driver inject tests
-- [ ] W4-03 frontend (dialog, badges, DDL modal, panel)
-- [ ] W4-04 docs + CAND-006/026 close-out
+- [x] W4-00 planning: spec + tasks + todos (`SPECS/spec-database-wave.md`, `TASKS/phase-14-database-wave.md`)
+- [x] W4-01 driver methods (create/stats/def ×2 engines)
+- [x] W4-02 routes + fake-driver inject tests
+- [x] W4-03 frontend (dialog, badges, DDL modal, panel)
+- [x] W4-04 docs + CAND-006/026 close-out
 - [ ] HUMAN GATE (before release): New Database + schema browser against real MariaDB + PostgreSQL

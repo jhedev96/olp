@@ -7,7 +7,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
-import { normalizeConfig, quotePgIdent, safeCell } from '../src/database.js';
+import { normalizeConfig, quotePgIdent, safeCell, validDbName } from '../src/database.js';
 import type { DbConfig, DbConn, DbDriver, DbEngine, DbRegistry, DbResult } from '../src/database.js';
 
 const KNOWN_PASSWORD = 'dbpass123';
@@ -31,6 +31,9 @@ interface FakeScript {
   tables?: string[];
   preview?: DbResult;
   queryResult?: DbResult;
+  createError?: string;
+  stats?: Array<{ name: string; rows: number | null; dataBytes: number | null; indexBytes: number | null }>;
+  def?: { ddl: string | null; columns: Array<{ name: string; type: string; nullable: boolean; def: string | null }> | null };
 }
 
 function makeDriver(engine: DbEngine, script: FakeScript = {}): {
@@ -74,6 +77,18 @@ function makeDriver(engine: DbEngine, script: FakeScript = {}): {
     previewRows: async (cfg, db, table) => {
       calls.push({ method: 'previewRows', cfg, db, table });
       return script.preview ?? { fields: ['id'], rows: [{ id: 1 }], affected: null };
+    },
+    createDatabase: async (cfg, name) => {
+      calls.push({ method: 'createDatabase', cfg, db: name });
+      if (script.createError !== undefined) throw new Error(script.createError);
+    },
+    tableStats: async (cfg, db) => {
+      calls.push({ method: 'tableStats', cfg, db });
+      return script.stats ?? [{ name: 'users', rows: 12, dataBytes: 16384, indexBytes: 0 }];
+    },
+    tableDef: async (cfg, db, table) => {
+      calls.push({ method: 'tableDef', cfg, db, table });
+      return script.def ?? { ddl: 'CREATE TABLE `users` (`id` int)', columns: null };
     },
     close: async () => {
       closed++;
@@ -183,6 +198,16 @@ describe('database pure helpers', () => {
     expect(safeCell(new Date('2024-01-02T03:04:05.000Z'))).toBe('2024-01-02T03:04:05.000Z');
     expect(safeCell(7)).toBe(7);
     expect(safeCell(null)).toBeNull();
+  });
+
+  it('validates database identifiers', () => {
+    expect(validDbName('appdb')).toBe(true);
+    expect(validDbName('a1_$')).toBe(true);
+    expect(validDbName('')).toBe(false);
+    expect(validDbName('has space')).toBe(false);
+    expect(validDbName('semi;colon')).toBe(false);
+    expect(validDbName('x'.repeat(64))).toBe(true);
+    expect(validDbName('x'.repeat(65))).toBe(false);
   });
 });
 
@@ -336,5 +361,62 @@ describe.each(['mysql', 'postgres'] as const)('server db routes (%s)', (engine) 
     const idle = rig();
     const cookie2 = await authedCookie(idle.app);
     expect((await idle.app.inject({ method: 'POST', url: `${base}/query`, headers: { cookie: cookie2 }, payload: { sql: 'SELECT 1' } })).statusCode).toBe(400);
+  });
+
+  it('creates databases with validated names', async () => {
+    const { app, made } = rig();
+    const cookie = await authedCookie(app);
+    await app.inject({ method: 'POST', url: `${base}/connect`, headers: { cookie }, payload: {} });
+    const create = (name: unknown) =>
+      app.inject({ method: 'POST', url: `${base}/databases`, headers: { cookie }, payload: { name } });
+    expect((await create('')).statusCode).toBe(400);
+    expect((await create('has space')).statusCode).toBe(400);
+    expect((await create('x'.repeat(65))).statusCode).toBe(400);
+    const ok = await create('appdb2');
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true, databases: ['appdb'] });
+    expect(made.calls.find((c) => c.method === 'createDatabase')?.db).toBe('appdb2');
+    const idle = rig();
+    const cookie2 = await authedCookie(idle.app);
+    expect(
+      (await idle.app.inject({ method: 'POST', url: `${base}/databases`, headers: { cookie: cookie2 }, payload: { name: 'appdb2' } })).statusCode,
+    ).toBe(400);
+  });
+
+  it('maps create errors to 409/403/500', async () => {
+    for (const [message, status] of [
+      ['Database exists', 409],
+      ['Access denied for user', 403],
+      ['permission denied to create database', 403],
+      ['connection lost', 500],
+    ] as const) {
+      const { app } = rig({ createError: message });
+      const cookie = await authedCookie(app);
+      await app.inject({ method: 'POST', url: `${base}/connect`, headers: { cookie }, payload: {} });
+      const res = await app.inject({ method: 'POST', url: `${base}/databases`, headers: { cookie }, payload: { name: 'appdb2' } });
+      expect(res.statusCode).toBe(status);
+      expect(typeof res.json().error).toBe('string');
+    }
+  });
+
+  it('serves schema and ddl shapes', async () => {
+    const stats = [{ name: 'users', rows: 12, dataBytes: 16384, indexBytes: 0 }];
+    const def = {
+      ddl: engine === 'mysql' ? 'CREATE TABLE `users` (`id` int)' : null,
+      columns: [{ name: 'id', type: 'int', nullable: false, def: null }],
+    };
+    const { app, made } = rig({ stats, def });
+    const cookie = await authedCookie(app);
+    await app.inject({ method: 'POST', url: `${base}/connect`, headers: { cookie }, payload: {} });
+    const schema = await app.inject({ method: 'GET', url: `${base}/schema?db=appdb`, headers: { cookie } });
+    expect(schema.json()).toEqual({ tables: stats });
+    expect(made.calls.find((c) => c.method === 'tableStats')?.db).toBe('appdb');
+    const ddl = await app.inject({ method: 'GET', url: `${base}/ddl?db=appdb&table=users`, headers: { cookie } });
+    expect(ddl.json()).toEqual(def);
+    expect((await app.inject({ method: 'GET', url: `${base}/schema`, headers: { cookie } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `${base}/ddl?db=appdb`, headers: { cookie } })).statusCode).toBe(400);
+    expect(
+      (await app.inject({ method: 'GET', url: `${base}/ddl?db=appdb&table=${'x'.repeat(129)}`, headers: { cookie } })).statusCode,
+    ).toBe(400);
   });
 });

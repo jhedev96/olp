@@ -31,6 +31,12 @@ function baseHandler(url: string): { status: number; json: unknown } {
   if (url.endsWith('/connect')) return { status: 200, json: { ok: true, databases: ['appdb'] } };
   if (url.endsWith('/databases')) return { status: 200, json: { databases: ['appdb'] } };
   if (url.includes('/tables?')) return { status: 200, json: { tables: ['users'] } };
+  if (url.includes('/schema?')) {
+    return { status: 200, json: { tables: [{ name: 'users', rows: 12, dataBytes: 16384, indexBytes: 4096 }] } };
+  }
+  if (url.includes('/ddl?')) {
+    return { status: 200, json: { ddl: 'CREATE TABLE `users` (`id` int)', columns: null } };
+  }
   if (url.includes('/rows?')) return { status: 200, json: { fields: ['id', 'name'], rows: [{ id: 1, name: 'ops' }, { id: 2, name: null }] } };
   if (url.endsWith('/query')) return { status: 200, json: { fields: ['n'], rows: [{ n: 2 }], affected: 1 } };
   return { status: 200, json: { ok: true } };
@@ -120,13 +126,13 @@ describe('web database page', () => {
     expect(screen.getByText('1 rows affected')).not.toBeNull();
   });
 
-  it('parks unfinished engines and transfers as disabled', async () => {
+  it('parks unfinished engines and transfers, ships New Database', async () => {
     stubApi((url) => baseHandler(url));
     await act(async () => {
       render(<DatabasePage />);
     });
     expect(screen.getByRole('button', { name: 'Redis' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'New Database' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'New Database' })).toHaveProperty('disabled', false);
     expect(screen.getByRole('button', { name: 'Import' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Export' })).toHaveProperty('disabled', true);
   });
@@ -167,5 +173,50 @@ describe('web database page', () => {
     fireEvent.change(area, { target: { value: 'SELECT 1' } });
     fireEvent.click(screen.getByText('Clear'));
     expect((screen.getByPlaceholderText('SELECT * FROM users LIMIT 10') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('creates databases, badges schema sizes and shows DDL', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      let json: unknown;
+      if (url.endsWith('/databases') && (init?.method ?? 'GET') === 'POST') {
+        json = { ok: true, databases: ['appdb', 'newdb'] };
+      } else {
+        json = baseHandler(url).json;
+      }
+      return Promise.resolve(new Response(JSON.stringify(json), { status: 200 }));
+    });
+    await act(async () => {
+      render(<DatabasePage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save & Connect'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('New Database'));
+    });
+    const input = screen.getByPlaceholderText('Database name (letters, digits, _ and $)') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'newdb' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    });
+    expect(calls).toContainEqual({ url: '/api/db/mysql/databases', method: 'POST' });
+    expect(screen.getByText('Databases (2)')).not.toBeNull();
+    expect(screen.getByText(/"newdb" created/)).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('appdb'));
+    });
+    expect(screen.getByText(/12 rows/)).not.toBeNull();
+    expect(screen.getByText(/16\.0 KB data/)).not.toBeNull();
+    expect(screen.getByText(/4\.0 KB/)).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Schema'));
+    });
+    expect(screen.getByText(/CREATE TABLE `users`/)).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByText('Close'));
+    });
+    expect(screen.queryByText(/CREATE TABLE `users`/)).toBeNull();
   });
 });

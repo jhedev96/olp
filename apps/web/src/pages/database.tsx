@@ -1,12 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
-import { ComingSoon } from '../components/common/States.js';
+import { fmtSize } from '../lib/format.js';
+import { PromptDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Input } from '../components/ui/input.js';
 
 type Engine = 'mysql' | 'postgres';
+
+/** `/api/db/:engine/schema` row shape. */
+export interface SchemaStat {
+  name: string;
+  rows: number | null;
+  dataBytes: number | null;
+  indexBytes: number | null;
+}
+
+/** `/api/db/:engine/ddl` shape (ddl null where the engine has no exact text). */
+export interface TableDefView {
+  ddl: string | null;
+  columns: Array<{ name: string; type: string; nullable: boolean; def: string | null }> | null;
+}
 
 /** Row + result shapes (server contract). */
 export interface DbCellRow {
@@ -63,11 +78,11 @@ export function ResultTable({ fields, rows, affected }: DbResult): ReactElement 
 /**
  * Database manager (mockup database parity): engine tabs, config form
  * with test + save-and-connect, live server version, disconnect,
- * db/table browser, 50-row preview, Ctrl+Enter ad-hoc SQL runner.
- * Honestly omitted (no source, backend frozen): Redis engine (CAND-024),
- * create-database (CAND-006), import/export transfer (CAND-025), schema
- * DDL + sizes (CAND-026), socket/buffer lines. List failures keep the
- * previous render.
+ * db/table browser with row-count/size badges, DDL modal, data-vs-index
+ * panel, New Database dialog, Ctrl+Enter ad-hoc SQL runner. Row counts
+ * are engine estimates (InnoDB/reltuples — footnoted in UI).
+ * Import/export transfer stays out (CAND-025); Redis stays out
+ * (CAND-024).
  */
 export function DatabasePage(): ReactElement {
   const [engine, setEngine] = useState<Engine>('mysql');
@@ -75,10 +90,12 @@ export function DatabasePage(): ReactElement {
   const [message, setMessage] = useState('');
   const [connected, setConnected] = useState(false);
   const [databases, setDatabases] = useState<string[]>([]);
-  const [tables, setTables] = useState<{ db: string; list: string[] } | null>(null);
+  const [tables, setTables] = useState<{ db: string; list: string[]; stats: SchemaStat[] } | null>(null);
   const [result, setResult] = useState<DbResult | { error: string } | null>(null);
   const [sql, setSql] = useState('');
   const [version, setVersion] = useState('');
+  const [promptCreate, setPromptCreate] = useState(false);
+  const [ddlView, setDdlView] = useState<{ table: string; def: TableDefView } | null>(null);
   const [copiedConn, setCopiedConn] = useState(false);
   const [tableQuery, setTableQuery] = useState('');
 
@@ -197,10 +214,44 @@ export function DatabasePage(): ReactElement {
 
   const openTables = async (db: string): Promise<void> => {
     try {
-      const body = await apiJson<{ tables: string[] }>(`/api/db/${engine}/tables?db=${encodeURIComponent(db)}`);
-      setTables({ db, list: body.tables });
+      const [tablesBody, statsBody] = await Promise.all([
+        apiJson<{ tables: string[] }>(`/api/db/${engine}/tables?db=${encodeURIComponent(db)}`),
+        apiJson<{ tables: SchemaStat[] }>(`/api/db/${engine}/schema?db=${encodeURIComponent(db)}`).catch(() => ({ tables: [] as SchemaStat[] })),
+      ]);
+      setTables({ db, list: tablesBody.tables, stats: statsBody.tables });
     } catch {
       // keep previous
+    }
+  };
+
+  const confirmCreate = async (name: string): Promise<void> => {
+    setPromptCreate(false);
+    const trimmed = name.trim();
+    if (trimmed === '') return;
+    setMessage('');
+    try {
+      const body = await apiJson<{ ok?: unknown; databases?: unknown; error?: string }>(`/api/db/${engine}/databases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (body.ok === true) {
+        setDatabases(Array.isArray(body.databases) ? body.databases : []);
+        setMessage(`Database "${trimmed}" created`);
+      } else setMessage(typeof body.error === 'string' ? body.error : 'Failed');
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const openDdl = async (db: string, table: string): Promise<void> => {
+    try {
+      const body = await apiJson<TableDefView>(
+        `/api/db/${engine}/ddl?db=${encodeURIComponent(db)}&table=${encodeURIComponent(table)}`,
+      );
+      setDdlView({ table, def: body });
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : 'Failed to load definition');
     }
   };
 
@@ -269,7 +320,7 @@ export function DatabasePage(): ReactElement {
         <Button size="sm" variant="outline" onClick={() => void disconnect()}>
           Disconnect
         </Button>
-        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-006)">
+        <Button size="sm" variant="outline" onClick={() => setPromptCreate(true)}>
           New Database
         </Button>
         <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-025)">
@@ -304,16 +355,33 @@ export function DatabasePage(): ReactElement {
             <div className="flex flex-col gap-1">
               {(tables?.list ?? [])
                 .filter((table) => table.toLowerCase().includes(tableQuery.trim().toLowerCase()))
-                .map((table) => (
-                  <button
-                    key={table}
-                    type="button"
-                    className="text-left text-sm hover:text-green-400"
-                    onClick={() => tables !== null && void browse(tables.db, table)}
-                  >
-                    {table}
-                  </button>
-                ))}
+                .map((table) => {
+                  const stat = tables?.stats.find((s) => s.name === table);
+                  return (
+                    <div key={table} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        className="mr-auto text-left text-sm hover:text-green-400"
+                        onClick={() => tables !== null && void browse(tables.db, table)}
+                      >
+                        {table}
+                        {stat !== undefined && (stat.rows !== null || stat.dataBytes !== null) && (
+                          <span className="ml-2 font-mono text-[11px] text-neutral-500">
+                            {stat.rows === null ? '?' : stat.rows} rows
+                            {stat.dataBytes !== null && ` · ${fmtSize(stat.dataBytes)}`}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-neutral-400 hover:text-green-400"
+                        onClick={() => tables !== null && void openDdl(tables.db, table)}
+                      >
+                        Schema
+                      </button>
+                    </div>
+                  );
+                })}
             </div>
           </Card>
           <Card>
@@ -352,10 +420,27 @@ export function DatabasePage(): ReactElement {
           )}
         </Card>
       )}
-      {connected && (
-        <div className="mt-3">
-          <ComingSoon feature="Schema sizes & DDL browser" candidate="CAND-026" />
-        </div>
+      {connected && tables !== null && (
+        <Card className="mt-3">
+          <h2 className="mb-1 font-bold">Data vs index ({tables.db})</h2>
+          {(() => {
+            const data = tables.stats.reduce((sum, s) => sum + (s.dataBytes ?? 0), 0);
+            const index = tables.stats.reduce((sum, s) => sum + (s.indexBytes ?? 0), 0);
+            const unknown = tables.stats.some((s) => s.dataBytes === null || s.indexBytes === null);
+            const total = data + index;
+            return (
+              <>
+                <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
+                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${total > 0 ? Math.round((data / total) * 100) : 0}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-neutral-400">
+                  {fmtSize(data)} data · {fmtSize(index)} index{unknown ? ' · some tables report no sizes' : ''}
+                </p>
+                <p className="text-[11px] text-neutral-500">Row counts are engine estimates (InnoDB/reltuples).</p>
+              </>
+            );
+          })()}
+        </Card>
       )}
       {connected && (
         <Card className="mt-3">
@@ -367,6 +452,44 @@ export function DatabasePage(): ReactElement {
           </div>
           <code className="mt-2 block truncate rounded bg-black/40 px-2 py-1 font-mono text-xs">{connectionString()}</code>
         </Card>
+      )}
+      <PromptDialog
+        open={promptCreate}
+        title="New database"
+        placeholder="Database name (letters, digits, _ and $)"
+        confirmLabel="Create"
+        onSubmit={(name) => void confirmCreate(name)}
+        onCancel={() => setPromptCreate(false)}
+      />
+      {ddlView !== null && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+            <h2 className="mb-2 font-mono text-sm font-bold">Schema: {ddlView.table}</h2>
+            {ddlView.def.ddl !== null ? (
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs">{ddlView.def.ddl}</pre>
+            ) : ddlView.def.columns !== null ? (
+              <table className="w-full text-sm">
+                <tbody>
+                  {ddlView.def.columns.map((col) => (
+                    <tr key={col.name}>
+                      <td className="font-mono">{col.name}</td>
+                      <td className="font-mono text-xs text-neutral-400">{col.type}</td>
+                      <td className="text-xs text-neutral-400">{col.nullable ? 'NULL' : 'NOT NULL'}</td>
+                      <td className="font-mono text-xs text-neutral-400">{col.def ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-sm text-neutral-400">No definition available.</p>
+            )}
+            <div className="mt-2">
+              <Button size="sm" variant="outline" onClick={() => setDdlView(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );
