@@ -186,3 +186,13 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W11-01 snippets lib + unit matrix
 - [x] W11-02 macros row + dialogs + page tests
 - [x] W11-03 docs + CAND-034 close
+
+## Phase 22 — Passkey + local login wave 12 (WebAuthn + loopback; spec + ADR-007 approved 2026-10-12)
+
+- [~] W12-00 planning: spec + ADR-007 + tasks + todos (`SPECS/spec-passkey-wave.md`, `docs/adr-007-webauthn-passkey.md`, `TASKS/phase-22-passkey-wave.md`)
+- [ ] W12-01 auth config passkey storage + tests
+- [ ] W12-02 dep + adapter + passkey endpoints + tests
+- [ ] W12-03 loopback local login + tests
+- [ ] W12-04 smoke extension + live ALL GREEN (+ authenticator human gate)
+- [ ] W12-05 frontend wiring
+- [ ] W12-06 docs + CAND-032 close
