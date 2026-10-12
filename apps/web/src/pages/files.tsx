@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import {
   Archive,
@@ -16,6 +16,8 @@ import {
 } from 'lucide';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
+import { formatCode, unsupportedReason } from '../lib/format-code.js';
+import { diffLines } from '../lib/line-diff.js';
 import type { EditorView } from '@codemirror/view';
 import { ConfirmDialog, PromptDialog } from '../components/common/Dialog.js';
 import { ComingSoon, EmptyState } from '../components/common/States.js';
@@ -86,13 +88,14 @@ export function isPreviewable(name: string): boolean {
 /**
  * File manager (mockup file-manager parity): root card, search + sort
  * + refresh, multi-select bulk bar with selection size, tabbed code
- * editor (highlight + line numbers, discard-to-opened) and highlighted
+ * editor (highlight + line numbers, discard-to-opened, prettify via
+ * Prettier core set, unified diff vs opened) and highlighted
  * read-only preview, per-type row actions, base64 upload, image
  * preview. The editor carries its native cursor (no custom readout).
  * Honestly omitted (no source,
  * backend frozen): Chmod column + ACL card (CAND-016), wakelock card,
  * CLI-jump chips (crumbs already cover fast navigation), symlink health
- * (CAND-014), editor prettify/diff (CAND-033); mounts/shortcuts ship as
+ * (CAND-014); mounts/shortcuts ship as
  * a Coming-Soon section (CAND-019).
  */
 export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView | null) => void } = {}): ReactElement {
@@ -112,6 +115,8 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [diskFree, setDiskFree] = useState<number | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
+  const [prettifying, setPrettifying] = useState(false);
 
   const load = useCallback(async (target: string): Promise<void> => {
     setError('');
@@ -296,6 +301,34 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
     if (tab === undefined) return;
     setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: t.original } : t)));
   };
+
+  const prettifyTab = async (): Promise<void> => {
+    const tab = tabs[activeTab];
+    if (tab === undefined || prettifying) return;
+    const reason = unsupportedReason(tab.name);
+    if (reason !== null) return;
+    setPrettifying(true);
+    setEditorError('');
+    try {
+      const formatted = await formatCode(tab.name, tab.content);
+      setTabs((prev) => prev.map((t, i) => (i === activeTab ? { ...t, content: formatted } : t)));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setEditorError(`Prettify failed: ${message.split('\n')[0]?.slice(0, 200) ?? 'unknown error'}`);
+    } finally {
+      setPrettifying(false);
+    }
+  };
+
+  const activeDiff = useMemo(() => {
+    const tab = tabs[activeTab];
+    if (tab === undefined) return { hunks: [], error: null as string | null };
+    try {
+      return { hunks: diffLines(tab.original, tab.content), error: null as string | null };
+    } catch (err) {
+      return { hunks: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  }, [tabs, activeTab]);
 
   const openPreview = async (name: string): Promise<void> => {
     if (isImage(name)) {
@@ -626,9 +659,26 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
                 />
               </>
             )}
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <Button size="sm" onClick={() => void saveEditor()}>
                 Save
+              </Button>
+              {(() => {
+                const reason = tab === undefined ? null : unsupportedReason(tab.name);
+                return (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={tab === undefined || reason !== null || prettifying}
+                    title={reason ?? 'Format with Prettier'}
+                    onClick={() => void prettifyTab()}
+                  >
+                    {prettifying ? 'Prettifying…' : 'Prettify'}
+                  </Button>
+                );
+              })()}
+              <Button size="sm" variant="outline" aria-pressed={showDiff} onClick={() => setShowDiff((v) => !v)}>
+                {showDiff ? 'Hide diff' : 'Diff'}
               </Button>
               <Button size="sm" variant="outline" onClick={discardTab}>
                 Discard
@@ -637,6 +687,41 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
                 Close
               </Button>
             </div>
+            {showDiff && tab !== undefined && (
+              <div className="mt-2 rounded-md border border-neutral-800 bg-black/40 p-2" aria-label={`Unsaved changes in ${tab.name}`}>
+                {activeDiff.error !== null ? (
+                  <p className="text-sm text-red-400">{activeDiff.error}</p>
+                ) : activeDiff.hunks.length === 0 ? (
+                  <p className="text-sm text-neutral-400">No unsaved changes.</p>
+                ) : (
+                  activeDiff.hunks.map((hunk) => (
+                    <div key={hunk.header} className="mb-2 last:mb-0">
+                      <p className="font-mono text-xs text-neutral-500">{hunk.header}</p>
+                      <pre className="overflow-auto font-mono text-xs">
+                        {hunk.lines.map((line, i) => (
+                          <div
+                            key={i}
+                            className={
+                              line.type === 'add'
+                                ? 'bg-green-950 text-green-300'
+                                : line.type === 'del'
+                                  ? 'bg-red-950 text-red-300'
+                                  : 'text-neutral-400'
+                            }
+                          >
+                            <span className="mr-2 inline-block w-16 select-none text-neutral-600">
+                              {line.type === 'add' ? `+${line.bLine}` : line.type === 'del' ? `-${line.aLine}` : `${line.aLine}`}
+                            </span>
+                            {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
+                            {line.text}
+                          </div>
+                        ))}
+                      </pre>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

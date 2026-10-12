@@ -175,7 +175,7 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 20 — Editor prettify + diff wave 10 (client-side; spec + ADR-006 approved 2026-10-12)
 
-- [~] W10-00 planning: spec + ADR-006 + tasks + todos (`SPECS/spec-editor-wave.md`, `docs/adr-006-editor-format-diff.md`, `TASKS/phase-20-editor-wave.md`)
-- [ ] W10-01 prettier + format-code + line-diff + unit tests
-- [ ] W10-02 files toolbar + diff panel + page tests
-- [ ] W10-03 docs + CAND-033 close
+- [x] W10-00 planning: spec + ADR-006 + tasks + todos (`SPECS/spec-editor-wave.md`, `docs/adr-006-editor-format-diff.md`, `TASKS/phase-20-editor-wave.md`)
+- [x] W10-01 prettier + format-code + line-diff + unit tests
+- [x] W10-02 files toolbar + diff panel + page tests
+- [x] W10-03 docs + CAND-033 close

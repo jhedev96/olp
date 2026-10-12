@@ -58,6 +58,10 @@ Termux/Alpine/macOS hardware.
   loopback badge); login + settings wired (checkbox, verified badge,
   bind card, row expiry via fmtIn); PBKDF2 310k/rehash dropped with
   rationale; editable bind splits to CAND-037. Smoke 67/67 on Linux.
+- Editor wave 10 (client-side, no backend): Prettier standalone
+  (lazy per-parser chunks) + hand-rolled LCS line diff; toolbar
+  wired (Prettify/Diff beside Discard/Save, failure inline,
+  unsupported disabled); no smoke (no backend surface).
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

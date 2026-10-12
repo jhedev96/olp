@@ -49,6 +49,7 @@
     "hast-util-to-jsx-runtime": "^2.3.6",
     "lowlight": "^3.3.0",
     "lucide": "^1.55.0",
+    "prettier": "3.9.10",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "recharts": "^3.10.1",

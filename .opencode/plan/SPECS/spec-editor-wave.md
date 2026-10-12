@@ -23,7 +23,7 @@ web suite green; no backend file touched.
 
 ```ts
 // apps/web/src/lib/format-code.ts (new)
-export interface FormatPlan { parser: string; plugins: unknown[] }
+export interface FormatPlan { parser: string } // plugins load lazily per parser (separate Vite chunks)
 export function formatPlanFor(name: string): FormatPlan | null; // null = unsupported
 export function unsupportedReason(name: string): string | null;
 export async function formatCode(name: string, content: string): Promise<string>;
