@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { apiJson } from '../lib/api.js';
+import { apiJson, ApiError } from '../lib/api.js';
 import { fmtSize, fmtUptime } from '../lib/format.js';
 import { CpuArea } from '../components/charts/CpuArea.js';
 import type { CpuSample } from '../components/charts/CpuArea.js';
 import { DiskBar } from '../components/charts/DiskBar.js';
 import { MemoryDonut } from '../components/charts/MemoryDonut.js';
 import { NetSpark } from '../components/charts/NetSpark.js';
-import { ComingSoon } from '../components/common/States.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { DataTable } from '../components/common/DataTable.js';
 import { Badge } from '../components/common/Badge.js';
 import { Button } from '../components/ui/button.js';
@@ -62,13 +62,13 @@ export function buildExport(cadenceMs: number, samples: CpuSample[]): string {
 }
 
 /**
- * Monitor (`/monitor`): live telemetry from the wave-1 endpoints.
- * Load wave + network spark are panel-observed ring buffers; per-core
- * bars, model/kernel/arch, temp, swap, disk rates, interfaces, sockets,
- * process table, and PM2 rows are server-measured. Only process kill
- * stays a tracked dummy (CAND-004 — deferred authz wave); Kill Task
- * still scrolls to the process section. Refresh cadence, pause, and
- * export are client-side real.
+ * Monitor (`/monitor`): live telemetry from the wave-1 endpoints plus
+ * wave-2 per-row process kill (SIGTERM behind ConfirmDialog, deny-by-
+ * default server authz). Load wave + network spark are panel-observed
+ * ring buffers; per-core bars, model/kernel/arch, temp, swap, disk
+ * rates, interfaces, sockets, process table, and PM2 rows are
+ * server-measured. Refresh cadence, pause, and export are client-side
+ * real. The header Kill Task button scrolls to the table.
  */
 export function MonitorPage(): ReactElement {
   const [cadenceMs, setCadenceMs] = useState<number>(1000);
@@ -78,6 +78,8 @@ export function MonitorPage(): ReactElement {
   const [pm2, setPm2] = useState<MonitorPm[] | null>(null);
   const [history, setHistory] = useState<CpuSample[]>([]);
   const [netHist, setNetHist] = useState<Array<{ i: number; down: number; up: number }>>([]);
+  const [pendingKill, setPendingKill] = useState<MonitorProc | null>(null);
+  const [killError, setKillError] = useState('');
 
   useEffect(() => {
     if (paused) return;
@@ -129,6 +131,33 @@ export function MonitorPage(): ReactElement {
       document.getElementById('monitor-processes')?.scrollIntoView();
     } catch {
       // headless renderers without layout
+    }
+  };
+
+  const refreshProcs = async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ processes: MonitorProc[]; pm2: MonitorPm[] | null }>('/api/monitor/processes?limit=25');
+      setProcs(body.processes);
+      setPm2(body.pm2);
+    } catch {
+      // keep the previous render on poll failure
+    }
+  };
+
+  const confirmKill = async (): Promise<void> => {
+    if (pendingKill === null) return;
+    const target = pendingKill;
+    setPendingKill(null);
+    setKillError('');
+    try {
+      await apiJson(`/api/monitor/processes/${target.pid}/kill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      await refreshProcs();
+    } catch (err) {
+      setKillError(err instanceof ApiError ? err.message : 'Kill failed');
     }
   };
 
@@ -261,6 +290,11 @@ export function MonitorPage(): ReactElement {
       </div>
 
       <div className="mt-3 flex flex-col gap-3" id="monitor-processes">
+        {killError !== '' && (
+          <p role="alert" className="text-sm text-red-400">
+            {killError}
+          </p>
+        )}
         <Card className="p-0">
           <div className="overflow-x-auto">
             <DataTable<MonitorProc>
@@ -275,6 +309,15 @@ export function MonitorPage(): ReactElement {
                 { key: 'cpu', header: 'CPU %', cell: (p) => (p.cpuPercent === null ? '—' : `${p.cpuPercent}%`) },
                 { key: 'mem', header: 'MEM', cell: (p) => fmtSize(p.memBytes) },
                 { key: 'uptime', header: 'Uptime', cell: (p) => (p.uptimeSec === null ? '—' : fmtUptime(p.uptimeSec)) },
+                {
+                  key: 'kill',
+                  header: 'Actions',
+                  cell: (p) => (
+                    <Button size="sm" variant="destructive" onClick={() => setPendingKill(p)}>
+                      Kill
+                    </Button>
+                  ),
+                },
               ]}
               rows={procs}
               rowKey={(p) => String(p.pid)}
@@ -296,8 +339,20 @@ export function MonitorPage(): ReactElement {
             </ul>
           </Card>
         )}
-        <ComingSoon feature="Process kill" candidate="CAND-004" />
       </div>
+      <ConfirmDialog
+        open={pendingKill !== null}
+        title="Kill process"
+        message={
+          pendingKill === null
+            ? ''
+            : `Kill PID ${pendingKill.pid} (${pendingKill.command})? The process gets SIGTERM and may lose unsaved work.`
+        }
+        confirmLabel="Kill"
+        destructive={true}
+        onConfirm={() => void confirmKill()}
+        onCancel={() => setPendingKill(null)}
+      />
     </main>
   );
 }
