@@ -47,6 +47,11 @@ Termux/Alpine/macOS hardware.
   (Termux-honest, nulls elsewhere → CAND-036); list gains additive
   `conf`; page wired (versions, ops buttons, Configure `?path=`
   deep-link, installed-only, mirror card). Smoke 55/55 on Linux.
+- Sessions wave 8: `GET /api/auth/sessions` (parsed-only in-memory
+  metadata, public ids, current flags), `POST :id/revoke` (404
+  unknown, self clears cookie) + `POST others/revoke`; login captures
+  UA/IP, touch refreshes per request; settings card wired (THIS
+  DEVICE, dialogs, fmtAgo). Smoke 61/61 on Linux.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

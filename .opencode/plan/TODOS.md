@@ -157,9 +157,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 18 — Device sessions wave 8 (list, revoke, logout-others; spec approved 2026-10-12)
 
-- [~] W8-00 planning: spec + tasks + todos (`SPECS/spec-sessions-wave.md`, `TASKS/phase-18-sessions-wave.md`)
-- [ ] W8-01 auth UA parser + session metadata + tests
-- [ ] W8-02 server capture/touch/endpoints + tests
-- [ ] W8-03 smoke extension + live ALL GREEN
-- [ ] W8-04 frontend wiring
-- [ ] W8-05 docs + CAND-030 close
+- [x] W8-00 planning: spec + tasks + todos (`SPECS/spec-sessions-wave.md`, `TASKS/phase-18-sessions-wave.md`)
+- [x] W8-01 auth UA parser + session metadata + tests
+- [x] W8-02 server capture/touch/endpoints + tests
+- [x] W8-03 smoke extension + live ALL GREEN
+- [x] W8-04 frontend wiring
+- [x] W8-05 docs + CAND-030 close
