@@ -207,3 +207,12 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W13-04 smoke extension + live ALL GREEN
 - [x] W13-05 frontend bind editor + restart flow
 - [x] W13-06 docs + CAND-037 close + 015-note
+
+## Phase 24 — Per-site stats wave 14 (CPU/RSS/version; spec approved 2026-10-13)
+
+- [~] W14-00 planning: spec + tasks + todos (`SPECS/spec-sitestats-wave.md`, `TASKS/phase-24-sitestats-wave.md`)
+- [ ] W14-01 sysinfo samplePid + unit tests
+- [ ] W14-02 sites pid/version/stats + sampler share + tests
+- [ ] W14-03 smoke extension + live ALL GREEN
+- [ ] W14-04 frontend cards + dashboard sum + tests
+- [ ] W14-05 docs + CAND-015 close
