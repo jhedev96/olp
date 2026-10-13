@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize } from '../lib/format.js';
+import { navigateTo } from '../lib/router.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Badge } from '../components/common/Badge.js';
 import { DataTable } from '../components/common/DataTable.js';
@@ -55,6 +56,7 @@ export interface BundleRow {
   id: string;
   created: number;
   parts: BundlePartRow[];
+  hasAuth?: boolean;
 }
 
 /** Bundle job step shape (snapshot + restore share it). */
@@ -115,7 +117,9 @@ export function BackupPage(): ReactElement {
   const [includeCrons, setIncludeCrons] = useState(true);
   const [activeSnapshot, setActiveSnapshot] = useState<BundleJobRow | null>(null);
   const [pendingBundleRestore, setPendingBundleRestore] = useState<BundleRow | null>(null);
+  const [restorePassword, setRestorePassword] = useState('');
   const [restoreStatus, setRestoreStatus] = useState<{ bundleId: string; job: BundleJobRow } | null>(null);
+  const [restoreLoggedOut, setRestoreLoggedOut] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -364,32 +368,42 @@ export function BackupPage(): ReactElement {
 
   const pollRestore = useCallback(async (bundleId: string, rid: string): Promise<void> => {
     try {
-      const body = await apiJson<{ job?: BundleJobRow }>(`/api/bundles/restores/${encodeURIComponent(rid)}`);
+      // Rethrow (no blind redirect): a 401 here is the expected logout
+      // after a credential restore, shown inline with a login button.
+      const body = await apiJson<{ job?: BundleJobRow }>(`/api/bundles/restores/${encodeURIComponent(rid)}`, {}, { unauthorized: 'rethrow' });
       if (body.job !== undefined) setRestoreStatus({ bundleId, job: body.job });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setRestoreLoggedOut(true);
+        return;
+      }
       // next tick retries
     }
   }, []);
 
   useEffect(() => {
-    if (restoreStatus === null || restoreStatus.job.state !== 'running') return;
+    if (restoreStatus === null || restoreStatus.job.state !== 'running' || restoreLoggedOut) return;
     const { bundleId, job } = restoreStatus;
     const timer = setInterval(() => {
       void pollRestore(bundleId, job.id);
     }, BUNDLE_POLL_MS);
     return () => clearInterval(timer);
-  }, [restoreStatus, pollRestore]);
+  }, [restoreStatus, restoreLoggedOut, pollRestore]);
 
   const confirmBundleRestore = async (): Promise<void> => {
     if (pendingBundleRestore === null) return;
     const bundleId = pendingBundleRestore.id;
+    const withAuth = pendingBundleRestore.hasAuth === true;
+    const password = restorePassword;
     setPendingBundleRestore(null);
+    setRestorePassword('');
+    setRestoreLoggedOut(false);
     setError('');
     try {
       const body = await apiJson<{ ok?: unknown; error?: string; id?: unknown }>(`/api/bundles/${encodeURIComponent(bundleId)}/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(withAuth ? { currentPassword: password } : {}),
       });
       if (typeof body.id !== 'string') {
         setError(typeof body.error === 'string' ? body.error : 'Restore failed to start');
@@ -690,24 +704,37 @@ export function BackupPage(): ReactElement {
                   </ul>
                   {restoreStatus !== null && restoreStatus.bundleId === bundle.id && (
                     <div className="mt-1 rounded border border-red-900 px-2 py-1.5" aria-live="polite">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="mr-auto text-xs font-medium">
-                          Restore {restoreStatus.job.state === 'running' ? 'running…' : restoreStatus.job.state === 'done' ? 'done' : 'failed'}
-                        </p>
-                        {restoreStatus.job.state !== 'running' && (
-                          <Button size="sm" variant="outline" onClick={() => setRestoreStatus(null)}>
-                            Dismiss
+                      {restoreLoggedOut ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="mr-auto text-xs font-medium">
+                            Logged out — the credential restore revoked all sessions. Log in with the restored credentials.
+                          </p>
+                          <Button size="sm" variant="outline" onClick={() => navigateTo('login')}>
+                            Go to login
                           </Button>
-                        )}
-                      </div>
-                      <ul className="mt-1 flex flex-col gap-0.5">
-                        {restoreStatus.job.steps.map((step) => (
-                          <li key={step.key} className="font-mono text-xs text-neutral-400">
-                            {step.status === 'ok' ? '✓' : step.status === 'failed' ? '✗' : '…'} {step.label}
-                            {step.detail !== '' && <span className="text-neutral-500"> — {step.detail}</span>}
-                          </li>
-                        ))}
-                      </ul>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="mr-auto text-xs font-medium">
+                              Restore {restoreStatus.job.state === 'running' ? 'running…' : restoreStatus.job.state === 'done' ? 'done' : 'failed'}
+                            </p>
+                            {restoreStatus.job.state !== 'running' && (
+                              <Button size="sm" variant="outline" onClick={() => setRestoreStatus(null)}>
+                                Dismiss
+                              </Button>
+                            )}
+                          </div>
+                          <ul className="mt-1 flex flex-col gap-0.5">
+                            {restoreStatus.job.steps.map((step) => (
+                              <li key={step.key} className="font-mono text-xs text-neutral-400">
+                                {step.status === 'ok' ? '✓' : step.status === 'failed' ? '✗' : '…'} {step.label}
+                                {step.detail !== '' && <span className="text-neutral-500"> — {step.detail}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
                     </div>
                   )}
                 </li>
@@ -770,7 +797,7 @@ export function BackupPage(): ReactElement {
         </div>
       )}
       <ConfirmDialog
-        open={pendingBundleRestore !== null}
+        open={pendingBundleRestore !== null && pendingBundleRestore.hasAuth !== true}
         title="Restore full system"
         message={
           pendingBundleRestore === null
@@ -782,6 +809,42 @@ export function BackupPage(): ReactElement {
         onConfirm={() => void confirmBundleRestore()}
         onCancel={() => setPendingBundleRestore(null)}
       />
+      {pendingBundleRestore !== null && pendingBundleRestore.hasAuth === true && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-label="Restore full system">
+          <div className="w-full max-w-lg rounded-lg border border-red-900 bg-neutral-900 p-4">
+            <h2 className="mb-2 font-bold">Restore full system</h2>
+            <p className="mb-2 text-sm text-neutral-300">
+              Restore bundle &ldquo;{pendingBundleRestore.id}&rdquo;? This drops and recreates every bundled database, overwrites panel
+              configs, restores the bundled login credentials, and re-adds missing cron jobs. Current data may be lost.
+            </p>
+            <p className="mb-2 text-sm font-medium text-red-400">You will be logged out immediately. Enter the current password to confirm.</p>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              aria-label="Current password"
+              placeholder="Current password"
+              value={restorePassword}
+              onChange={(ev) => setRestorePassword(ev.target.value)}
+              className="w-full"
+            />
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" variant="destructive" onClick={() => void confirmBundleRestore()}>
+                Restore all
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setPendingBundleRestore(null);
+                  setRestorePassword('');
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mt-3">
         <Card>
           <h2 className="mb-2 font-bold">Scheduled snapshots</h2>
