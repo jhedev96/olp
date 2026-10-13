@@ -11,6 +11,7 @@ import {
   parsePidStat,
   parsePidStatus,
   parseTcpListening,
+  samplePid,
   sampleProcesses,
   sampleSummary,
 } from '../src/monitor.js';
@@ -289,5 +290,42 @@ describe('sampleProcesses', () => {
       25,
     );
     expect(processes[0]?.command.length).toBe(128);
+  });
+});
+
+describe('samplePid', () => {
+  it('samples one pid with null cpu on first poll', async () => {
+    const sampler = createMonitorSampler();
+    const sample = await samplePid(deps(true, 1728470400000), sampler, 1234);
+    expect(sample).toEqual({ cpuPercent: null, memBytes: 142000 * 1024 });
+  });
+
+  it('computes shares on the second poll from shared deltas', async () => {
+    const sampler = createMonitorSampler();
+    await samplePid(deps(true, 1728470400000), sampler, 1234);
+    const second = await samplePid(
+      deps(false, 1728470401000, {
+        readFile: (p: string) => {
+          if (p === '/proc/stat') return STAT_2;
+          if (p === '/proc/1234/stat') {
+            return '1234 (my proc) R 1 2 3 4 5 6 7 8 9 10 140 50 0 0 20 0 4 0 5000 100000 500 0 0 0';
+          }
+          return files(false)[p] ?? null;
+        },
+      }),
+      sampler,
+      1234,
+    );
+    // pid delta 40 jiffies of 100 system jiffies × 2 cores = 80%.
+    expect(second).toEqual({ cpuPercent: 80, memBytes: 142000 * 1024 });
+  });
+
+  it('answers null for bad pids and raced exits', async () => {
+    const sampler = createMonitorSampler();
+    expect(await samplePid(deps(true, 0), sampler, 0)).toBeNull();
+    expect(await samplePid(deps(true, 0), sampler, -5)).toBeNull();
+    expect(await samplePid(deps(true, 0), sampler, 4242)).toBeNull();
+    const throwing: SysDeps = deps(true, 0, { readFile: () => { throw new Error('gone'); } });
+    expect(await samplePid(throwing, sampler, 1234)).toBeNull();
   });
 });
