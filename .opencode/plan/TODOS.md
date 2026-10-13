@@ -247,3 +247,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [ ] W17-03 smoke extension (live run deferred with phase 26)
 - [ ] W17-04 frontend password field + logout copy + tests
 - [ ] W17-05 docs + CAND-038 close
+
+## Phase 28 — Editor side-panel parity wave 18 (layout only; spec approved 2026-10-13)
+
+- [~] W18-00 planning: spec + tasks + todos (`SPECS/spec-editor-sidepanel-wave.md`, `TASKS/phase-28-sidepanel-wave.md`)
+- [ ] W18-01 side-panel layout + tests
+- [ ] W18-02 docs + CAND-040 close

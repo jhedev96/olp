@@ -44,6 +44,7 @@
 | CAND-035 | ~~Backup full-system bundle (databases + crons + configs)~~ | Wave 16 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — manifest + snapshot/restore jobs + smoke + page wired; unit/integration green, behavioral proof is a HUMAN GATE | Split from CAND-029 in wave 6; auth inclusion splits to CAND-038 |
 | CAND-038 | Bundle auth-config inclusion (reauth + rollback + revoke) | Wave 17 spec approved 2026-10-13 (human-locked A): `auth.json` rides configs, restore last with password reauth, rollback copy, revoke-all | Split from CAND-035 in wave 16 |
 | CAND-039 | Code formatter parser expansion (php/py/sql/sh) | NEW: editor/preview cover php/py/sql already; only Prettier formatting is core-set-only (residual of CAND-033) | Split from CAND-033 in wave 17 planning |
+| CAND-040 | Editor + preview side-panel parity (modal → beside list) | NEW wave 18: editor/preview shipped as fullscreen modals, mockup shows side panels; human test-drive 2026-10-13 | Split from the files row in wave 18 planning |
 | CAND-036 | ~~Store per-env mirror detection + purge-cache~~ | Wave 15 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — unit/integration green, behavioral proof is a HUMAN GATE | Brew attempt null-safe; metalink hosts honestly excluded |
 | CAND-037 | ~~Editable bind with restart flow~~ | Shipped wave 13: file bind + validation + restart + fallback (CLOSED 2026-10-13) | systemd/PM2 generation stays out (installers own it) |
 
