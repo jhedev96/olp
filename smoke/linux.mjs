@@ -244,6 +244,64 @@ if (zipOk) {
   }
   check('backup schedule fired', fired);
   check('backup schedule deleted', json('DELETE', `/api/backups/schedules/${schedId}`).ok === true);
+  // bundle wave 16 (manifest + jobs; needs real zip/unzip for the configs part)
+  const unzipOk = execSync('command -v unzip >/dev/null 2>&1 && echo yes || echo no', { encoding: 'utf8' }).trim() === 'yes';
+  if (zipOk && unzipOk) {
+    const snap = json('POST', '/api/bundles', {});
+    check('bundle snapshot started', snap.ok === true && typeof snap.id === 'string');
+    let bundle = null;
+    if (snap.ok === true) {
+      for (let i = 0; i < 24; i++) {
+        execSync('sleep 5');
+        const cur = json('GET', `/api/bundles/${snap.id}`);
+        if (cur.job !== null && cur.job !== undefined && cur.job.state !== 'running') {
+          bundle = cur.bundle;
+          break;
+        }
+      }
+    }
+    check('bundle snapshot done', bundle !== null && Array.isArray(bundle.parts));
+    // No engines on the smoke box: DB parts are proven via inject only (recorded, not hidden).
+    const kinds = bundle !== null ? bundle.parts.map((p) => p.kind).sort().join(',') : '';
+    check('bundle parts are configs plus crons', kinds === 'configs,crons');
+    let partsVerify = bundle !== null;
+    if (bundle !== null) {
+      for (const p of bundle.parts) {
+        const v = json('GET', `/api/backups/${p.name}/verify`);
+        if (!(v.ok === true && v.match === true)) {
+          partsVerify = false;
+          break;
+        }
+      }
+    }
+    check('bundle parts verify', partsVerify);
+    const restore = bundle !== null ? json('POST', `/api/bundles/${snap.id}/restore`, {}) : { ok: false };
+    check('bundle restore started', restore.ok === true && typeof restore.id === 'string');
+    let restored = null;
+    if (restore.ok === true) {
+      for (let i = 0; i < 24; i++) {
+        execSync('sleep 5');
+        const cur = json('GET', `/api/bundles/restores/${restore.id}`);
+        if (cur.job !== undefined && cur.job.state !== 'running') {
+          restored = cur.job;
+          break;
+        }
+      }
+    }
+    check('bundle restore done', restored !== null && restored.state === 'done');
+    if (bundle !== null) {
+      for (const p of bundle.parts) {
+        json('DELETE', `/api/backups/${p.name}`);
+      }
+    }
+    check('bundle parts cleaned', (() => {
+      const names = new Set(json('GET', '/api/backups').backups.map((b) => b.name));
+      return bundle !== null && bundle.parts.every((p) => !names.has(p.name));
+    })());
+    // NOTE: the manifest `<id>.bundle.json` stays as the durable record (by design).
+  } else {
+    console.log('SKIP bundle wave 16 (zip/unzip missing)');
+  }
   for (const b of json('GET', '/api/backups').backups) {
     if (typeof b.name === 'string' && b.name.startsWith('smoke-')) {
       json('DELETE', `/api/backups/${b.name}`);
