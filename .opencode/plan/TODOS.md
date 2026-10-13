@@ -253,3 +253,13 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [~] W18-00 planning: spec + tasks + todos (`SPECS/spec-editor-sidepanel-wave.md`, `TASKS/phase-28-sidepanel-wave.md`)
 - [ ] W18-01 side-panel layout + tests
 - [ ] W18-02 docs + CAND-040 close
+
+## Phase 29 — Ops dummies sweep wave 19 (013/016/019; spec approved 2026-10-13)
+
+- [~] W19-00 planning: spec + tasks + todos (`SPECS/spec-ops-sweep-wave.md`, `TASKS/phase-29-ops-sweep-wave.md`)
+- [ ] W19-01 files mode + chmod + tests
+- [ ] W19-02 mounts endpoint + tests
+- [ ] W19-03 log ring + endpoint + tests
+- [ ] W19-04 smoke extension (live or recorded-deferred)
+- [ ] W19-05 frontend wiring
+- [ ] W19-06 docs + CAND-013/016/019 close
