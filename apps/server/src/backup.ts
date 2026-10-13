@@ -5,7 +5,9 @@ import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
 import { relOf, safePath } from './files.js';
 import { nextRunMs, parseCronSchedule } from './cron-schedule.js';
-import type { DbConfig } from './database.js';
+import type { CronJob } from './cron.js';
+import type { DbConfig, DbEngine } from './database.js';
+import { filterUserDatabases } from './database.js';
 
 /** Backup kinds: folder archives plus per-engine SQL dumps. */
 export type BackupType = 'folder' | 'mysql' | 'postgres';
@@ -51,6 +53,332 @@ export interface BackupOptions {
   /** Shared database credential reader (single `db.json` source of truth). */
   dbConfig: (engine: 'mysql' | 'postgres') => DbConfig;
   now?: () => number;
+  /** Bundle discovery (absent → bundle endpoints answer unavailable). */
+  bundle?: BundleDiscovery;
+}
+
+/** Full-system bundle part kinds (manifest-level; archives reuse normal sidecars). */
+export type BundlePartKind = 'mysql' | 'postgres' | 'configs' | 'crons';
+
+/** One bundle part (every part is a normal verified archive). */
+export interface BundlePart {
+  name: string;
+  file: string;
+  kind: BundlePartKind;
+  sha256: string;
+}
+
+/** Bundle manifest (persisted `<id>.bundle.json` in the backups dir, `0600`). */
+export interface BundleManifest {
+  id: string;
+  created: number;
+  parts: BundlePart[];
+}
+
+/** One snapshot step (live status for the bundles UI poll). */
+export interface BundleStep {
+  key: string;
+  label: string;
+  status: 'pending' | 'running' | 'ok' | 'failed';
+  detail: string;
+}
+
+/** Snapshot job record (memory-only; the manifest persists on success). */
+export interface BundleJob {
+  id: string;
+  state: 'running' | 'done' | 'failed';
+  steps: BundleStep[];
+  started: number;
+  finished: number | null;
+}
+
+/** Snapshot selection (defaults: all discovered DBs + configs + crons). */
+export interface BundleSelection {
+  databases?: { mysql?: string[]; postgres?: string[] };
+  configs?: boolean;
+  crons?: boolean;
+}
+
+/** Snapshot discovery deps (production wires drivers/cron in `index.ts`). */
+export interface BundleDiscovery {
+  /** Raw database names per engine (unfiltered; failures read as `[]`). */
+  listDatabases: (engine: DbEngine) => Promise<string[]>;
+  readCronJobs: () => Promise<CronJob[]>;
+}
+
+/** Inputs for {@link runBundleSnapshot} (shared by the route and tests). */
+export interface BundleSnapshotDeps {
+  sys: BackupSystem;
+  dataDir: string;
+  root: string;
+  dbConfig: (engine: 'mysql' | 'postgres') => DbConfig;
+  now: () => number;
+  discovery: BundleDiscovery;
+}
+
+/** Panel config files staged into the configs part (auth `config.json` excluded → CAND-038). */
+const BUNDLE_CONFIG_FILES = ['sites.json', 'db.json', 'settings.json', 'nginx.json'];
+
+/** Snapshot selection cap (documented; keeps enumerate intersections small). */
+const BUNDLE_SELECT_CAP = 50;
+
+/** Step detail cap (documented; keeps job payloads small). */
+const BUNDLE_DETAIL_CAP = 200;
+
+/** Recent bundle jobs kept in memory (documented; the manifest is the durable record). */
+const BUNDLE_JOBS_KEPT = 20;
+
+function bundleManifestPath(dataDir: string, id: string): string {
+  return join(backupsDir(dataDir), `${id}.bundle.json`);
+}
+
+function isBundlePartKind(value: unknown): value is BundlePartKind {
+  return value === 'mysql' || value === 'postgres' || value === 'configs' || value === 'crons';
+}
+
+/**
+ * Shape-validate a manifest (corrupt/missing files read as `null`,
+ * never throw — a bad bundle must not break the list).
+ */
+export function readBundleManifest(sys: BackupSystem, dataDir: string, id: string): BundleManifest | null {
+  const raw = sys.readFile(bundleManifestPath(dataDir, id));
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj['id'] !== 'string' || typeof obj['created'] !== 'number' || !Array.isArray(obj['parts'])) {
+      return null;
+    }
+    const parts: BundlePart[] = [];
+    for (const entry of obj['parts']) {
+      if (typeof entry !== 'object' || entry === null) return null;
+      const part = entry as Record<string, unknown>;
+      if (
+        typeof part['name'] !== 'string' ||
+        typeof part['file'] !== 'string' ||
+        !isBundlePartKind(part['kind']) ||
+        typeof part['sha256'] !== 'string'
+      ) {
+        return null;
+      }
+      parts.push({ name: part['name'], file: part['file'], kind: part['kind'], sha256: part['sha256'] });
+    }
+    return { id: obj['id'], created: obj['created'], parts };
+  } catch {
+    return null;
+  }
+}
+
+/** Newest-first manifests (corrupt files skipped). */
+export function listBundleManifests(sys: BackupSystem, dataDir: string): BundleManifest[] {
+  let names: string[];
+  try {
+    names = sys.listDir(backupsDir(dataDir));
+  } catch {
+    return [];
+  }
+  const out: BundleManifest[] = [];
+  for (const file of names) {
+    if (!file.endsWith('.bundle.json')) continue;
+    const manifest = readBundleManifest(sys, dataDir, file.slice(0, -'.bundle.json'.length));
+    if (manifest !== null) out.push(manifest);
+  }
+  out.sort((a, b) => b.created - a.created);
+  return out;
+}
+
+/** Fresh running job (routes register it before kicking the run). */
+export function createBundleJob(id: string, started: number): BundleJob {
+  return { id, state: 'running', steps: [], started, finished: null };
+}
+
+function capDetail(text: string): string {
+  return text === '' ? 'failed' : text.slice(0, BUNDLE_DETAIL_CAP);
+}
+
+/**
+ * Run one full-system snapshot: enumerate → per-DB dumps → configs →
+ * crons → manifest. Dump parts reuse `createArchive` (same bytes as
+ * manual dumps). A failing step marks the job `failed` and stops;
+ * earlier parts stay as normal visible archives. Never rejects (all
+ * failures land on the job record).
+ */
+export async function runBundleSnapshot(
+  deps: BundleSnapshotDeps,
+  job: BundleJob,
+  selection: BundleSelection,
+): Promise<BundleJob> {
+  const { sys, dataDir } = deps;
+  const dir = backupsDir(dataDir);
+  const fail = (step: BundleStep, err: unknown): BundleJob => {
+    const message = err instanceof Error ? err.message : String(err);
+    step.status = 'failed';
+    step.detail = capDetail(message);
+    job.state = 'failed';
+    job.finished = deps.now();
+    return job;
+  };
+  try {
+    // 1. enumerate (per-engine list failures read as honest empties so
+    // engine-less boxes still snapshot configs + crons).
+    const discovered: Record<DbEngine, string[]> = { mysql: [], postgres: [] };
+    const notes: string[] = [];
+    for (const engine of ['mysql', 'postgres'] as const) {
+      let raw: string[];
+      try {
+        raw = await deps.discovery.listDatabases(engine);
+      } catch {
+        raw = [];
+        notes.push(`${engine}: list failed`);
+      }
+      const users = [...new Set(filterUserDatabases(engine, raw))];
+      const wanted = selection.databases?.[engine];
+      discovered[engine] = wanted === undefined ? users : users.filter((db) => wanted.includes(db));
+    }
+    const summary = `mysql: ${discovered.mysql.length}, postgres: ${discovered.postgres.length}`;
+    job.steps.push({
+      key: 'enumerate',
+      label: 'Discover databases',
+      status: 'ok',
+      detail: notes.length > 0 ? `${summary} (${notes.join('; ')})` : summary,
+    });
+
+    const parts: BundlePart[] = [];
+    const plan: Array<{ key: string; label: string; run: () => Promise<string> }> = [];
+    for (const engine of ['mysql', 'postgres'] as const) {
+      for (const db of discovered[engine]) {
+        plan.push({
+          key: `dump-${engine}-${db}`,
+          label: `Dump ${engine} ${db}`,
+          run: async () => {
+            const created = await createArchive(sys, dataDir, deps.root, deps.dbConfig, deps.now, {
+              type: engine,
+              name: sanitizeBackupName(`${job.id}--${engine}-${db}`, () => `${job.id}--${engine}-db`),
+              source: db,
+              gzip: true,
+            });
+            const meta = readMeta(sys, dataDir, created.name);
+            parts.push({ name: created.name, file: created.file, kind: engine, sha256: meta?.sha256 ?? '' });
+            return created.file;
+          },
+        });
+      }
+    }
+    if (selection.configs !== false) {
+      plan.push({
+        key: 'configs',
+        label: 'Bundle configs',
+        run: async () => {
+          const staging = join(dir, `.staging-${job.id}`);
+          const staged: string[] = [];
+          try {
+            sys.mkdirp(staging);
+            for (const file of BUNDLE_CONFIG_FILES) {
+              const raw = sys.readFile(join(dataDir, file));
+              if (raw === null) continue;
+              const dest = join(staging, file);
+              sys.writeFile(dest, raw);
+              staged.push(dest);
+            }
+            if (staged.length === 0) return 'no config files present';
+            await mustBin(sys, 'zip', 'Package "zip" is not installed — install it first via the Store menu');
+            const name = sanitizeBackupName(`${job.id}--configs`, () => `${job.id}--configs`);
+            const archive = `${name}.zip`;
+            await sys.exec(`zip -rq ${quote(join(dir, archive))} .`, ARCHIVE_TIMEOUT_MS, { cwd: staging });
+            const sha256 = await hashStream(sys.streamFile(join(dir, archive)));
+            sys.writeFile(
+              metaPath(dataDir, name),
+              JSON.stringify({ name, file: archive, type: 'folder', source: `bundle:${job.id}/configs`, created: deps.now(), sha256 }, null, 2),
+              { mode: 0o600 },
+            );
+            parts.push({ name, file: archive, kind: 'configs', sha256 });
+            return `${staged.length} files -> ${archive}`;
+          } finally {
+            for (const dest of staged) sys.removeFile(dest);
+          }
+        },
+      });
+    }
+    if (selection.crons !== false) {
+      plan.push({
+        key: 'crons',
+        label: 'Export cron jobs',
+        run: async () => {
+          const jobs = await deps.discovery.readCronJobs();
+          const name = sanitizeBackupName(`${job.id}--crons`, () => `${job.id}--crons`);
+          const file = `${name}.crons.json`;
+          sys.mkdirp(dir);
+          sys.writeFile(join(dir, file), JSON.stringify(jobs, null, 2));
+          const sha256 = await hashStream(sys.streamFile(join(dir, file)));
+          sys.writeFile(
+            metaPath(dataDir, name),
+            JSON.stringify({ name, file, type: 'folder', source: `bundle:${job.id}/crons`, created: deps.now(), sha256 }, null, 2),
+            { mode: 0o600 },
+          );
+          parts.push({ name, file, kind: 'crons', sha256 });
+          return `${jobs.length} jobs -> ${file}`;
+        },
+      });
+    }
+    plan.push({
+      key: 'manifest',
+      label: 'Write manifest',
+      run: async () => {
+        sys.mkdirp(dir);
+        sys.writeFile(
+          bundleManifestPath(dataDir, job.id),
+          JSON.stringify({ id: job.id, created: deps.now(), parts }, null, 2),
+          { mode: 0o600 },
+        );
+        return `${parts.length} parts`;
+      },
+    });
+
+    for (const item of plan) {
+      const step: BundleStep = { key: item.key, label: item.label, status: 'running', detail: '' };
+      job.steps.push(step);
+      try {
+        step.detail = await item.run();
+        step.status = 'ok';
+      } catch (err) {
+        return fail(step, err);
+      }
+    }
+    job.state = 'done';
+    job.finished = deps.now();
+    return job;
+  } catch (err) {
+    const step: BundleStep = { key: 'snapshot', label: 'Snapshot', status: 'pending', detail: '' };
+    job.steps.push(step);
+    return fail(step, err);
+  }
+}
+
+/** Coerce a snapshot selection (unknown shapes throw for the 400 handler). */
+export function parseBundleSelection(body: Record<string, unknown>): BundleSelection {
+  const out: BundleSelection = {};
+  const dbs = body['databases'];
+  if (dbs !== undefined) {
+    if (typeof dbs !== 'object' || dbs === null || Array.isArray(dbs)) throw new Error('Invalid databases selection');
+    const sel: { mysql?: string[]; postgres?: string[] } = {};
+    for (const engine of ['mysql', 'postgres'] as const) {
+      const list = (dbs as Record<string, unknown>)[engine];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || list.length > BUNDLE_SELECT_CAP || !list.every((e) => typeof e === 'string')) {
+        throw new Error('Invalid databases selection');
+      }
+      sel[engine] = [...(list as string[])];
+    }
+    out.databases = sel;
+  }
+  for (const key of ['configs', 'crons'] as const) {
+    const value = body[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'boolean') throw new Error(`Invalid ${key} selection`);
+    out[key] = value;
+  }
+  return out;
 }
 
 /** Archive/DB operation timeout (120 s, Terwo parity). */
@@ -578,5 +906,54 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
       }
     }
     return { ok: true };
+  });
+
+  const bundleJobs = new Map<string, BundleJob>();
+  let bundleRunning: string | null = null;
+
+  app.post('/api/bundles', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
+    const discovery = opts.bundle;
+    if (discovery === undefined) throw new Error('Bundles are not available');
+    if (bundleRunning !== null) {
+      reply.code(409);
+      return { error: 'A bundle snapshot is already running' };
+    }
+    const selection = parseBundleSelection(((req.body ?? {}) as Record<string, unknown>));
+    const id = `bundle-${backupStamp(new Date(now()))}-${randomBytes(4).toString('hex')}`;
+    sys.mkdirp(dir);
+    const job = createBundleJob(id, now());
+    bundleJobs.set(id, job);
+    if (bundleJobs.size > BUNDLE_JOBS_KEPT) {
+      for (const [key, kept] of bundleJobs) {
+        if (bundleJobs.size <= BUNDLE_JOBS_KEPT) break;
+        if (kept.state !== 'running') bundleJobs.delete(key);
+      }
+    }
+    bundleRunning = id;
+    void runBundleSnapshot(
+      { sys, dataDir: opts.dataDir, root: opts.root, dbConfig: opts.dbConfig, now, discovery },
+      job,
+      selection,
+    ).finally(() => {
+      if (bundleRunning === id) bundleRunning = null;
+    });
+    return { ok: true, id };
+  });
+
+  app.get('/api/bundles', async () => {
+    sys.mkdirp(dir);
+    return { bundles: listBundleManifests(sys, opts.dataDir) };
+  });
+
+  app.get('/api/bundles/:id', async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const bundle = validBackupName(id) ? readBundleManifest(sys, opts.dataDir, id) : null;
+    const job = bundleJobs.get(id) ?? null;
+    if (bundle === null && job === null) {
+      reply.code(404);
+      return { error: 'Unknown bundle' };
+    }
+    return { bundle, job };
   });
 }
