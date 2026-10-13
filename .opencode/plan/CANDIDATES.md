@@ -20,13 +20,13 @@
 | CAND-010 | ~~`confirm()`/`prompt()` → Dialog~~ | none (frontend-only) | CLOSED 2026-10-10: shared `Dialog` + all 10 call sites migrated (6 pages) |
 | CAND-011 | Header avatar / user profiles | NEW or dummy-forever (single-admin has no profiles) | From P0a shell read; likely permanent dummy |
 | CAND-012 | Self-hosted Geist + JetBrains Mono | none (asset weight decision) | System stack ships v1; revisit with size budget |
-| CAND-013 | Dashboard: live panel log tail (+copy/clear) | NEW: panel log tail endpoint (pm2/journald backends) | From P0b; pairs with watchdog-adjacent work, separate spec |
+| CAND-013 | ~~Dashboard: live panel log tail~~ | Shipped wave 19: `GET /api/logs` ring (cap 200, fixed feed list) + dashboard card (CLOSED 2026-10-13) | Copy/clear cut (needs retention + PII review) |
 | CAND-014 | ~~Extended system telemetry (temp, freq, zram, net I/O, sockets, per-core, disk rates, model/kernel/arch)~~ | Shipped wave 1: `GET /api/monitor/summary` (CLOSED 2026-10-12) | Wakelock line dropped with record (no queryable source); FS label out (no portable source) |
 | CAND-015 | ~~Per-site memory + engine version~~ (panel self-restart half DONE wave 13) | Wave 14 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — unit/integration green, behavioral proof is a HUMAN GATE | Site-stats half implemented, awaiting human live proof |
-| CAND-016 | File mode/owner in listings + chmod editing | NEW: stat mode in file entries + chmod endpoint | From P0c files read (Chmod column, 0755/0644 strings, ACL card) |
+| CAND-016 | ~~File mode/owner in listings + chmod editing~~ | Shipped wave 19: octal `mode` field + jailed `POST /api/chmod` + page wiring (CLOSED 2026-10-13) | Symlinks rejected (health stays CAND-014); owner uid cut to additive-field rule |
 | CAND-017 | Terminal workspaces (multi-tab sessions, split panes, per-tab TTY) | NEW: multi-session manager + tab metadata (TTY, proc names) | From P0c terminal read; singleton manager today |
 | CAND-018 | WS latency indicator | EXTEND: ping/pong in WS protocol | From P0c terminal read (0.4ms badge); tiny protocol addition |
-| CAND-019 | Storage mounts/shortcuts card | NEW: root-path + Termux storage probe endpoint (or static per-env map) | From P0c files read; fold Termux symlink health here |
+| CAND-019 | ~~Storage mounts/shortcuts card~~ | Shipped wave 19: `GET /api/mounts` stat-only probe + page card (CLOSED 2026-10-13) | Grant state not queried (fs visibility only, footnoted) |
 | CAND-020 | Per-site auto-restart toggle | NEW: autorestart flag on sites + supervisor respawn | From P0d websites read (toggle per app card) |
 | CAND-021 | Nginx vhost advanced (SSL states, per-vhost toggles, conf edit, master stats) | NEW: nginx conf parse/manage endpoints | From P0d proxy read; CRUD stays real, this is the advanced layer |
 | CAND-022 | Port availability indicator in deploy modal | NEW: tiny port-probe endpoint (or attempt-bind) | From P0d add-modal read |
