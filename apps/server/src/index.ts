@@ -32,7 +32,7 @@ import { realSpawnShell, registerStoreRoutes } from './store.js';
 import type { SpawnShell } from './store.js';
 import { fileSettingsStore, registerSettingsRoutes } from './settings.js';
 import { freshReport, resolveBind } from './settings.js';
-import type { BindReport } from './settings.js';
+import type { BindConfig, BindReport } from './settings.js';
 import type { SettingsStore } from './settings.js';
 import { migrateLegacy } from './migrate.js';
 import { TelegramBot, nodeTelegramApi } from './telegram.js';
@@ -87,6 +87,8 @@ export interface ServerOptions {
   telegramApi?: TelegramApi;
   /** Bot-username thunk override for settings tests (production proxies stored-token getMe). */
   settingsBotUsername?: () => Promise<string | null>;
+  /** Restart seam override for settings tests (production exits for a supervisor). */
+  settingsRestart?: { exit(code: number): void; supervisor(): string };
   watchdogProbe?: WatchdogProbe;
   /** Kill deps override for monitor tests (production wires `process.*`). */
   monitorKill?: KillDeps;  /** Controller factory override for services tests. */
@@ -233,6 +235,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     },
     testSend: (tg) => telegramApi.sendMessage(tg.botToken, tg.chatId, 'OLP notification test successful!'),
     bindReport: bind,
+    restart: opts.settingsRestart,
     botUsername: opts.settingsBotUsername ?? (async () => {
       const tg = settingsStore.load().telegram;
       if (!tg.enabled || tg.botToken === '') return null;
@@ -290,14 +293,44 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
 }
 
 /**
+ * Listen with localhost fallback. A taken/forbidden primary bind must
+ * never leave a dead panel: log loudly, serve the fallback, and say
+ * so in the report. Fallback failing too → throw (nothing to serve).
+ */
+export async function listenWithFallback(
+  app: Pick<FastifyInstance, 'listen'>,
+  report: BindReport,
+  fallback: BindConfig = { host: '127.0.0.1', port: 8080 },
+): Promise<void> {
+  try {
+    await app.listen({ port: report.configured.port, host: report.configured.host });
+    report.effective = { ...report.configured };
+    report.fallback = false;
+  } catch (err) {
+    const code = typeof err === 'object' && err !== null ? (err as Record<string, unknown>)['code'] : undefined;
+    if (code !== 'EADDRINUSE' && code !== 'EACCES') throw err;
+    // eslint-disable-next-line no-console
+    console.error(
+      `Bind ${report.configured.host}:${report.configured.port} failed (${String(code)}) — falling back to ${fallback.host}:${fallback.port}`,
+    );
+    await app.listen({ port: fallback.port, host: fallback.host });
+    report.effective = { ...fallback };
+    report.fallback = true;
+  }
+}
+
+/**
  * Start the server when executed directly (`node dist/index.js`).
- * Respects `PANEL_PORT` / `PANEL_HOST` for Terwo compat; defaults
- * to localhost-only per security posture.
+ * Bind resolves env > file > localhost-default (single source of
+ * truth shared with the settings routes); a bad bind falls back to
+ * localhost-only per recovery posture, never a silent death.
  */
 async function main(): Promise<void> {
-  const port = Number.parseInt(process.env['PANEL_PORT'] ?? '8080', 10);
-  const host = process.env['PANEL_HOST'] ?? '127.0.0.1';
-  const { app, auth, telegram, watchdog } = buildServer();
+  const { app, auth, telegram, watchdog, bind } = buildServer();
+  if (bind.source !== 'env' && (process.env['PANEL_HOST'] !== undefined || process.env['PANEL_PORT'] !== undefined)) {
+    // eslint-disable-next-line no-console
+    console.error('Ignoring invalid PANEL_HOST/PANEL_PORT, using next bind source');
+  }
   if (auth.created && auth.plaintextPassword !== undefined) {
     // eslint-disable-next-line no-console
     console.log(
@@ -314,9 +347,9 @@ async function main(): Promise<void> {
       console.log('Health check failed:', err instanceof Error ? err.message : String(err));
     });
   }, 60000).unref();
-  await app.listen({ port, host });
+  await listenWithFallback(app, bind);
   // eslint-disable-next-line no-console
-  console.log(`OLP listening on http://${host}:${port}`);
+  console.log(`OLP listening on http://${bind.effective.host}:${bind.effective.port}`);
 }
 
 const entry = process.argv[1];

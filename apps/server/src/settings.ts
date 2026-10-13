@@ -152,6 +152,8 @@ export interface SettingsRouteOptions {
   botUsername?: () => Promise<string | null>;
   /** Shared bind report (listen mutates effective/fallback — W13-03). */
   bindReport: BindReport;
+  /** Restart seam (default exits for a supervisor; tests inject fakes). */
+  restart?: { exit(code: number): void; supervisor(): string };
 }
 
 /** Fresh report (effective == configured until listen proves otherwise). */
@@ -253,5 +255,21 @@ export function registerSettingsRoutes(app: FastifyInstance, opts: SettingsRoute
     opts.bindReport.configured = resolved.bind;
     opts.bindReport.source = resolved.source;
     return { ok: true, restartRequired: true };
+  });
+
+  app.post('/api/server/restart', async () => {
+    // Respond FIRST, exit after (setImmediate runs post-flush).
+    // Sessions die with the process (in-memory, by design) — the UI
+    // polls health, then goes to login. Exit code 0: supervisors
+    // restart, manual runners were warned in the dialog copy.
+    const restart = opts.restart ?? {
+      exit: (code: number) => process.exit(code),
+      supervisor: () => (process.env['pm_id'] !== undefined ? 'pm2' : 'unknown'),
+    };
+    const supervisor = restart.supervisor();
+    setImmediate(() => {
+      app.close().catch(() => undefined).finally(() => restart.exit(0));
+    });
+    return { ok: true, supervisor };
   });
 }

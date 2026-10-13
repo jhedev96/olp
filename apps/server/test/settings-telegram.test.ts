@@ -391,6 +391,84 @@ describe('server settings routes', () => {
       else process.env['PANEL_PORT'] = savedPort;
     }
   });
+
+  it('restarts through the seam without killing the runner', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const exits: number[] = [];
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      settingsStore: memorySettings().store,
+      telegramApi: makeApi(),
+      settingsRestart: { exit: (code) => { exits.push(code); }, supervisor: () => 'test-sup' },
+    });
+    const cookie = await authedCookie(app);
+    expect((await app.inject({ method: 'POST', url: '/api/server/restart' })).statusCode).toBe(401);
+    const res = await app.inject({ method: 'POST', url: '/api/server/restart', headers: { cookie } });
+    expect(res.json()).toEqual({ ok: true, supervisor: 'test-sup' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(exits).toEqual([0]);
+  });
+
+  it('falls back on taken ports and rethrows foreign errors', async () => {
+    const { listenWithFallback } = await import('../src/index.js');
+    const calls: Array<{ port: number; host: string }> = [];
+    const stubFor = (code: string | null) => {
+      let primary = true;
+      return {
+        listen: async ({ port, host }: { port: number; host: string }) => {
+          calls.push({ port, host });
+          // Only the primary bind fails; the fallback always succeeds.
+          if (code !== null && primary) {
+            primary = false;
+            throw Object.assign(new Error('bind fail'), { code });
+          }
+        },
+      };
+    };
+    const report = () => ({ configured: { host: '0.0.0.0', port: 9999 }, source: 'file' as const, effective: { host: '0.0.0.0', port: 9999 }, fallback: false });
+
+    const ok = report();
+    await listenWithFallback(stubFor(null), ok);
+    expect(ok).toMatchObject({ effective: { host: '0.0.0.0', port: 9999 }, fallback: false });
+
+    const busy = report();
+    await listenWithFallback(stubFor('EADDRINUSE'), busy, { host: '127.0.0.1', port: 18081 });
+    expect(calls.at(-1)).toEqual({ port: 18081, host: '127.0.0.1' });
+    expect(busy).toMatchObject({ effective: { host: '127.0.0.1', port: 18081 }, fallback: true });
+
+    await expect(listenWithFallback(stubFor('EIO'), report())).rejects.toThrow('bind fail');
+  });
+
+  it('falls back on a really occupied port', async () => {
+    const { createServer } = await import('node:net');
+    const { listenWithFallback } = await import('../src/index.js');
+    const squat = createServer();
+    await new Promise<void>((resolve) => squat.listen(0, '127.0.0.1', resolve));
+    const taken = (squat.address() as { port: number }).port;
+    try {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+      const { app, bind } = buildServer({
+        dataDir,
+        legacyDir,
+        env: fakeEnv,
+        sysDeps: quietDeps(),
+        root,
+        settingsStore: memorySettings().store,
+        telegramApi: makeApi(),
+      });
+      bind.configured = { host: '127.0.0.1', port: taken };
+      await listenWithFallback(app, bind, { host: '127.0.0.1', port: 0 });
+      expect(bind.fallback).toBe(true);
+      expect(bind.effective.port).not.toBe(taken);
+      await app.close();
+    } finally {
+      squat.close();
+    }
+  });
 });
 
 describe('server telegram bot', () => {
