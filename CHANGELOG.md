@@ -93,7 +93,13 @@ Termux/Alpine/macOS hardware.
   missing-only crons, failed-if-any) + bundle card with DB checklist
   dialog and live step polls. Unit/integration green (server 196,
   web 174); behavioral proof is a HUMAN GATE (TODOS phase 26).
-  Auth `config.json` stays excluded (CAND-038).
+- Auth-config bundle wave 17 [UNTESTED live — merged 2026-10-13 on
+  human decision, box inadequate for live servers]: `auth.json`
+  rides the configs part (`hasAuth` manifest flag) + restore-auth
+  step last (current-password reauth, rollback copy, revoke-all
+  with expected-logout UX). Unit/integration green (auth 32,
+  server 203, web 176); behavioral proof rides the phase-26
+  HUMAN GATE.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
