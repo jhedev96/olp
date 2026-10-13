@@ -368,6 +368,26 @@ if (zipOk) {
   console.log('SKIP backup advanced (zip missing)');
 }
 
+// ops sweep wave 19 (chmod, mounts, logs — no zip needed)
+json('POST', '/api/write', { path: 'smoke', name: 'mode.txt', content: 'x' });
+check('chmod round-trip', (() => {
+  const before = json('GET', '/api/files?path=smoke').entries.find((e) => e.name === 'mode.txt');
+  const flip = json('POST', '/api/chmod', { path: 'smoke', name: 'mode.txt', mode: '0600' });
+  const after = json('GET', '/api/files?path=smoke').entries.find((e) => e.name === 'mode.txt');
+  const back = json('POST', '/api/chmod', { path: 'smoke', name: 'mode.txt', mode: '0644' });
+  return typeof before?.mode === 'string' && flip.ok === true && after?.mode === '0600' && back.ok === true;
+})());
+check('chmod rejects bad mode', json('POST', '/api/chmod', { path: 'smoke', name: 'mode.txt', mode: 'abc' }).error === 'Invalid mode (octal, e.g. 0644)');
+json('POST', '/api/delete', { path: 'smoke', name: 'mode.txt' });
+check('mounts list jail root', (() => {
+  const m = json('GET', '/api/mounts');
+  return Array.isArray(m.mounts) && m.mounts.length > 0 && m.mounts[0].present === true;
+})());
+check('logs tail boot line', (() => {
+  const l = json('GET', '/api/logs?tail=200');
+  return Array.isArray(l.logs) && l.logs.some((e) => typeof e.msg === 'string' && e.msg.includes('OLP boot'));
+})());
+
 // monitor wave 1 (read-only telemetry)
 check('monitor summary 401', execSync(`curl -s -o /dev/null -w '%{http_code}' ${BASE}/api/monitor/summary`, { encoding: 'utf8' }) === '401');
 const summary = json('GET', '/api/monitor/summary');
