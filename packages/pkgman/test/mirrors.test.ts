@@ -12,10 +12,10 @@ import {
 describe('pkgman mirrors', () => {
   it('describes sources per environment', () => {
     expect(mirrorSource('termux')).toMatchObject({ kind: 'apt', underPrefix: true });
-    expect(mirrorSource('debian')).toMatchObject({ kind: 'apt', file: '/etc/apt/sources.list', ext: '.list' });
+    expect(mirrorSource('debian')).toMatchObject({ kind: 'apt', file: '/etc/apt/sources.list', exts: ['.list', '.sources'] });
     expect(mirrorSource('arch')).toMatchObject({ kind: 'pacman', file: '/etc/pacman.d/mirrorlist' });
     expect(mirrorSource('alpine')).toMatchObject({ kind: 'apk', file: '/etc/apk/repositories' });
-    expect(mirrorSource('fedora')).toMatchObject({ kind: 'yum', ext: '.repo' });
+    expect(mirrorSource('fedora')).toMatchObject({ kind: 'yum', exts: ['.repo'] });
     expect(mirrorSource('macos')).toMatchObject({ kind: 'brew' });
     expect(mirrorSource('windows')).toBeNull();
   });

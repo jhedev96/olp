@@ -257,7 +257,7 @@ export function registerStoreRoutes(app: FastifyInstance, opts: StoreOptions): v
     }
     if (source.dir !== undefined) {
       const dir = source.underPrefix === true ? join(prefix, source.dir) : source.dir;
-      for (const entry of listSourceDir(dir).filter((f) => source.ext === undefined || f.endsWith(source.ext)).sort()) {
+      for (const entry of listSourceDir(dir).filter((f) => source.exts === undefined || source.exts.some((ext) => f.endsWith(ext))).sort()) {
         candidates.push(join(dir, entry));
       }
     }

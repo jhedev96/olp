@@ -9,8 +9,8 @@ export interface MirrorSource {
   kind: 'apt' | 'pacman' | 'apk' | 'yum' | 'brew';
   file?: string;
   dir?: string;
-  /** Suffix filter for directory scans (e.g. `.list`, `.repo`). */
-  ext?: string;
+  /** Suffix filter for directory scans (e.g. one-line `.list` + DEB822 `.sources`). */
+  exts?: string[];
   /** Join paths under `$PREFIX` (Termux only). */
   underPrefix?: boolean;
 }
@@ -22,17 +22,17 @@ export interface MirrorSource {
 export function mirrorSource(env: EnvId): MirrorSource | null {
   switch (env) {
     case 'termux':
-      return { kind: 'apt', file: 'etc/apt/sources.list', dir: 'etc/apt/sources.list.d', ext: '.list', underPrefix: true };
+      return { kind: 'apt', file: 'etc/apt/sources.list', dir: 'etc/apt/sources.list.d', exts: ['.list', '.sources'], underPrefix: true };
     case 'debian':
     case 'wsl2':
-      return { kind: 'apt', file: '/etc/apt/sources.list', dir: '/etc/apt/sources.list.d', ext: '.list' };
+      return { kind: 'apt', file: '/etc/apt/sources.list', dir: '/etc/apt/sources.list.d', exts: ['.list', '.sources'] };
     case 'arch':
       return { kind: 'pacman', file: '/etc/pacman.d/mirrorlist' };
     case 'alpine':
       return { kind: 'apk', file: '/etc/apk/repositories' };
     case 'fedora':
     case 'rhel':
-      return { kind: 'yum', dir: '/etc/yum.repos.d', ext: '.repo' };
+      return { kind: 'yum', dir: '/etc/yum.repos.d', exts: ['.repo'] };
     case 'macos':
       return { kind: 'brew' };
     default:
