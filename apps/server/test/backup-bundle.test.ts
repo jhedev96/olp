@@ -393,6 +393,7 @@ describe('server bundle snapshot', () => {
           readCronJobs: () => Promise.resolve(cronJobs),
           readCronLines: () => Promise.resolve([]),
           writeCronLines: () => Promise.resolve(),
+          revokeSessions: () => {},
         },
       },
       job,

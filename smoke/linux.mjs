@@ -284,6 +284,8 @@ if (zipOk) {
       }
     }
     check('bundle snapshot done', bundle !== null && Array.isArray(bundle.parts));
+    // Wave 17: the live box always has credentials, so snapshots carry auth.
+    check('bundle snapshot hasAuth', bundle !== null && bundle.hasAuth === true);
     // No engines on the smoke box: DB parts are proven via inject only (recorded, not hidden).
     const kinds = bundle !== null ? bundle.parts.map((p) => p.kind).sort().join(',') : '';
     check('bundle parts are configs plus crons', kinds === 'configs,crons');
@@ -298,20 +300,51 @@ if (zipOk) {
       }
     }
     check('bundle parts verify', partsVerify);
-    const restore = bundle !== null ? json('POST', `/api/bundles/${snap.id}/restore`, {}) : { ok: false };
+    // Wave 17: wrong password fails the restore closed with the session alive.
+    const wrong = bundle !== null ? json('POST', `/api/bundles/${snap.id}/restore`, { currentPassword: 'wrong-smoke-pw' }) : { ok: false };
+    check('bundle restore rejects wrong password', wrong.ok === true && typeof wrong.id === 'string');
+    let wrongJob = null;
+    if (wrong.ok === true) {
+      for (let i = 0; i < 24; i++) {
+        execSync('sleep 5');
+        const cur = json('GET', `/api/bundles/restores/${wrong.id}`);
+        if (cur.job !== undefined && cur.job.state !== 'running') {
+          wrongJob = cur.job;
+          break;
+        }
+      }
+    }
+    check('bundle restore failed closed', wrongJob !== null && wrongJob.state === 'failed');
+    check('session alive after failed restore', Array.isArray(json('GET', '/api/backups').backups));
+    const restore = bundle !== null ? json('POST', `/api/bundles/${snap.id}/restore`, { currentPassword: P }) : { ok: false };
     check('bundle restore started', restore.ok === true && typeof restore.id === 'string');
     let restored = null;
+    let loggedOut = false;
     if (restore.ok === true) {
       for (let i = 0; i < 24; i++) {
         execSync('sleep 5');
-        const cur = json('GET', `/api/bundles/restores/${restore.id}`);
-        if (cur.job !== undefined && cur.job.state !== 'running') {
+        const raw = api('GET', `/api/bundles/restores/${restore.id}`);
+        const cur = JSON.parse(raw || 'null');
+        if (cur === null || cur.job === undefined) {
+          loggedOut = true;
+          break;
+        }
+        if (cur.job.state !== 'running') {
           restored = cur.job;
           break;
         }
       }
     }
-    check('bundle restore done', restored !== null && restored.state === 'done');
+    // Revocation kills our cookie before any poll can observe `done`
+    // (deterministic: no request after revoke is ever authorized).
+    check('bundle restore logs out (expected)', loggedOut);
+    // Fresh login after the credential-restore logout (same live credentials).
+    execSync(`curl -s -c ${cj} -X POST ${BASE}/api/login -H 'Content-Type: application/json' -d '{"username":"${U}","password":"${P}"}'`, { encoding: 'utf8' });
+    check('re-login after credential restore', Array.isArray(json('GET', '/api/backups').backups));
+    if (restore.ok === true) {
+      const cur = json('GET', `/api/bundles/restores/${restore.id}`);
+      check('bundle restore done after relogin', cur.job !== undefined && cur.job.state === 'done');
+    }
     if (bundle !== null) {
       for (const p of bundle.parts) {
         json('DELETE', `/api/backups/${p.name}`);

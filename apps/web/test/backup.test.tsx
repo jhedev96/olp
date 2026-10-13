@@ -263,6 +263,7 @@ describe('web backup page', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Restore all' }));
     });
     expect(calls.some((c) => c.url === '/api/bundles/bundle-9/restore' && c.method === 'POST')).toBe(true);
+    expect(calls.find((c) => c.url === '/api/bundles/bundle-9/restore')?.body).toEqual({});
     await waitFor(() => {
       expect(screen.getByText(/1 files applied/)).not.toBeNull();
     });
@@ -278,5 +279,38 @@ describe('web backup page', () => {
       fireEvent.click(within(item).getByText('Restore'));
     });
     expect(screen.getByRole('dialog').textContent).toContain('may be overwritten');
+  });
+
+  it('asks the current password for auth bundles and handles logout', async () => {
+    const bundle = { id: 'bundle-auth', created: 7, hasAuth: true, parts: [] };
+    const { calls } = stubApi((url, method) => {
+      if (url === '/api/bundles' && method === 'GET') return { status: 200, json: { bundles: [bundle] } };
+      if (url === '/api/bundles/bundle-auth/restore') return { status: 200, json: { ok: true, id: 'restore-9' } };
+      if (url === '/api/bundles/restores/restore-9') return { status: 401, json: { error: 'Not logged in' } };
+      if (url === '/api/stats') return { status: 200, json: {} };
+      if (url === '/api/install') return { status: 200, json: { items: [] } };
+      if (url === '/api/backups/schedules') return { status: 200, json: { schedules: [] } };
+      return { status: 200, json: BACKUPS };
+    });
+    await act(async () => {
+      render(<BackupPage />);
+    });
+    const item = (screen.getByText('bundle-auth').closest('li') as HTMLElement) ?? document.body;
+    await act(async () => {
+      fireEvent.click(within(item).getByText('Restore all'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('logged out');
+    fireEvent.change(within(dialog).getByLabelText('Current password'), { target: { value: 'secret-pw' } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Restore all' }));
+    });
+    expect(calls.find((c) => c.url === '/api/bundles/bundle-auth/restore')?.body).toEqual({ currentPassword: 'secret-pw' });
+    await waitFor(() => {
+      expect(screen.getByText(/restored credentials/)).not.toBeNull();
+    });
+    expect(screen.getByText('Go to login')).not.toBeNull();
+    const polls = calls.filter((c) => c.url === '/api/bundles/restores/restore-9').length;
+    expect(polls).toBeLessThan(3);
   });
 });

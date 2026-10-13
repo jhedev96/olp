@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
 import { relOf, safePath } from './files.js';
 import { nextRunMs, parseCronSchedule } from './cron-schedule.js';
+import { parseAuthConfig, verifyPassword } from '@olp/auth';
 import { cronJobLine, findMissingCronJobs, parseCronExport, parseCronLine } from './cron.js';
 import type { CronJob } from './cron.js';
 import type { DbConfig, DbEngine } from './database.js';
@@ -74,6 +75,8 @@ export interface BundleManifest {
   id: string;
   created: number;
   parts: BundlePart[];
+  /** True when the configs part carries `auth.json` (absent = pre-038 bundle = no auth). */
+  hasAuth?: boolean;
 }
 
 /** One snapshot step (live status for the bundles UI poll). */
@@ -109,6 +112,8 @@ export interface BundleDiscovery {
   readCronLines: () => Promise<string[]>;
   /** Replace the whole crontab (restore re-creates missing jobs only). */
   writeCronLines: (lines: string[]) => Promise<void>;
+  /** Revoke every session (credential restore logs the operator out). */
+  revokeSessions: () => void;
 }
 
 /** Inputs for {@link runBundleSnapshot} (shared by the route and tests). */
@@ -155,6 +160,7 @@ export function readBundleManifest(sys: BackupSystem, dataDir: string, id: strin
     if (typeof obj['id'] !== 'string' || typeof obj['created'] !== 'number' || !Array.isArray(obj['parts'])) {
       return null;
     }
+    if (obj['hasAuth'] !== undefined && typeof obj['hasAuth'] !== 'boolean') return null;
     const parts: BundlePart[] = [];
     for (const entry of obj['parts']) {
       if (typeof entry !== 'object' || entry === null) return null;
@@ -169,7 +175,7 @@ export function readBundleManifest(sys: BackupSystem, dataDir: string, id: strin
       }
       parts.push({ name: part['name'], file: part['file'], kind: part['kind'], sha256: part['sha256'] });
     }
-    return { id: obj['id'], created: obj['created'], parts };
+    return { id: obj['id'], created: obj['created'], parts, ...(obj['hasAuth'] === true ? { hasAuth: true as const } : {}) };
   } catch {
     return null;
   }
@@ -250,6 +256,7 @@ export async function runBundleSnapshot(
     });
 
     const parts: BundlePart[] = [];
+    let hasAuth = false;
     const plan: Array<{ key: string; label: string; run: () => Promise<string> }> = [];
     for (const engine of ['mysql', 'postgres'] as const) {
       for (const db of discovered[engine]) {
@@ -285,6 +292,15 @@ export async function runBundleSnapshot(
               const dest = join(staging, file);
               sys.writeFile(dest, raw);
               staged.push(dest);
+            }
+            // Credentials ride the configs part under a non-live name
+            // (auth inclusion = CAND-038; restore validates + reauths).
+            const authRaw = sys.readFile(join(dataDir, 'config.json'));
+            if (authRaw !== null) {
+              const dest = join(staging, 'auth.json');
+              sys.writeFile(dest, authRaw);
+              staged.push(dest);
+              hasAuth = true;
             }
             if (staged.length === 0) return 'no config files present';
             await mustBin(sys, 'zip', 'Package "zip" is not installed — install it first via the Store menu');
@@ -333,7 +349,7 @@ export async function runBundleSnapshot(
         sys.mkdirp(dir);
         sys.writeFile(
           bundleManifestPath(dataDir, job.id),
-          JSON.stringify({ id: job.id, created: deps.now(), parts }, null, 2),
+          JSON.stringify({ id: job.id, created: deps.now(), parts, hasAuth }, null, 2),
           { mode: 0o600 },
         );
         return `${parts.length} parts`;
@@ -398,6 +414,7 @@ export async function runBundleRestore(
   deps: BundleRestoreDeps,
   manifest: BundleManifest,
   job: BundleJob,
+  currentPassword?: string,
 ): Promise<BundleJob> {
   const { sys, dataDir } = deps;
   const dir = backupsDir(dataDir);
@@ -518,9 +535,84 @@ export async function runBundleRestore(
     }
   }
 
+  if (manifest.hasAuth === true) {
+    if (!(await restoreAuthPart(deps, manifest, job, currentPassword))) failed = true;
+  }
+
   job.state = failed ? 'failed' : 'done';
   job.finished = deps.now();
   return job;
+}
+
+/**
+ * Replay bundled credentials last: reauth against the live config,
+ * shape-validate the backup, rollback-copy, overwrite, revoke all
+ * sessions. Fail-closed at every gate (zero writes until all pass).
+ * Returns true on success.
+ */
+async function restoreAuthPart(
+  deps: BundleRestoreDeps,
+  manifest: BundleManifest,
+  job: BundleJob,
+  currentPassword: string | undefined,
+): Promise<boolean> {
+  const { sys, dataDir } = deps;
+  const dir = backupsDir(dataDir);
+  const step: BundleStep = { key: 'restore-auth', label: 'Restore credentials', status: 'running', detail: '' };
+  job.steps.push(step);
+  try {
+    if (typeof currentPassword !== 'string' || currentPassword === '') throw new Error('Current password required');
+    const liveRaw = sys.readFile(join(dataDir, 'config.json'));
+    let liveSalt = '';
+    let liveHash = '';
+    if (liveRaw !== null) {
+      try {
+        const parsed: unknown = JSON.parse(liveRaw);
+        if (typeof parsed === 'object' && parsed !== null) {
+          const row = parsed as Record<string, unknown>;
+          if (typeof row['salt'] === 'string') liveSalt = row['salt'];
+          if (typeof row['hash'] === 'string') liveHash = row['hash'];
+        }
+      } catch {
+        // falls through to the wrong-password failure below
+      }
+    }
+    if (liveSalt === '' || liveHash === '' || !verifyPassword(currentPassword, liveSalt, liveHash)) {
+      throw new Error('Current password is wrong');
+    }
+    const configsPart = manifest.parts.find((part) => part.kind === 'configs');
+    if (configsPart === undefined) throw new Error('Auth backup is missing');
+    const full = join(dir, configsPart.file);
+    if (sys.statFile(full) === null) throw new Error('Auth backup is missing');
+    await mustBin(sys, 'unzip', 'Package "unzip" is not installed — install it first via the Store menu');
+    const staging = join(dir, `.staging-restore-auth-${job.id}`);
+    sys.mkdirp(staging);
+    let bundled: string;
+    try {
+      await sys.exec(`unzip -o ${quote(full)} -d ${quote(staging)}`, ARCHIVE_TIMEOUT_MS);
+      const raw = sys.readFile(join(staging, 'auth.json'));
+      if (raw === null) throw new Error('Auth backup is missing');
+      try {
+        parseAuthConfig(JSON.parse(raw));
+      } catch {
+        throw new Error('Invalid auth in bundle');
+      }
+      bundled = raw;
+    } finally {
+      sys.removeFile(join(staging, 'auth.json'));
+    }
+    sys.writeFile(join(dataDir, `config.json.pre-restore-${backupStamp(new Date(deps.now()))}`), liveRaw as string, { mode: 0o600 });
+    sys.writeFile(join(dataDir, 'config.json'), bundled, { mode: 0o600 });
+    deps.discovery.revokeSessions();
+    step.status = 'ok';
+    step.detail = 'credentials restored (logged out)';
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    step.status = 'failed';
+    step.detail = capDetail(message);
+    return false;
+  }
 }
 
 /** Coerce a snapshot selection (unknown shapes throw for the 400 handler). */
@@ -1154,7 +1246,11 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
     restoreJobs.set(rid, job);
     pruneJobs(restoreJobs);
     restoreRunning = rid;
-    void runBundleRestore({ sys, dataDir: opts.dataDir, dbConfig: opts.dbConfig, now, discovery }, manifest, job).finally(() => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    const password = body['currentPassword'];
+    if (password !== undefined && typeof password !== 'string') throw new Error('Invalid current password');
+    const currentPassword = typeof password === 'string' ? password : undefined;
+    void runBundleRestore({ sys, dataDir: opts.dataDir, dbConfig: opts.dbConfig, now, discovery }, manifest, job, currentPassword).finally(() => {
       if (restoreRunning === rid) restoreRunning = null;
     });
     return { ok: true, id: rid };

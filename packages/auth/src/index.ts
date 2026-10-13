@@ -18,6 +18,7 @@ export {
 export type { AuthConfig, ConfigIo, LoadResult, PasskeyCredential } from './config.js';
 export {
   loadConfig,
+  parseAuthConfig,
   saveConfig,
   verifyCredentials,
   changeUsername,

@@ -241,12 +241,13 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 27 — Auth-config bundle wave 17 (reauth + rollback + revoke; spec approved 2026-10-13)
 
-- [~] W17-00 planning: spec + tasks + todos (`SPECS/spec-auth-bundle-wave.md`, `TASKS/phase-27-auth-bundle-wave.md`)
-- [ ] W17-01 parseAuthConfig export + tests
-- [ ] W17-02 snapshot auth.json + hasAuth + restore-auth step + revoke wiring + tests
-- [ ] W17-03 smoke extension (live run deferred with phase 26)
-- [ ] W17-04 frontend password field + logout copy + tests
-- [ ] W17-05 docs + CAND-038 close
+- [x] W17-00 planning: spec + tasks + todos (`SPECS/spec-auth-bundle-wave.md`, `TASKS/phase-27-auth-bundle-wave.md`)
+- [x] W17-01 parseAuthConfig export + tests
+- [x] W17-02 snapshot auth.json + hasAuth + restore-auth step + revoke wiring + tests
+- [ ] W17-03 smoke extension (code committed; LIVE UNTESTED — merged 2026-10-13 on human decision)
+- [x] W17-04 frontend password field + logout copy + tests
+- [x] W17-05 docs (CAND-038 merged UNTESTED, gate below)
+- [ ] HUMAN GATE: auth-restore live proof (wrong-pw fail-closed → right-pw 401 → re-login green; rides the phase-26 deferred run, record PASS/FAIL here)
 
 ## Phase 28 — Editor side-panel parity wave 18 (layout only; spec approved 2026-10-13)
 
