@@ -114,6 +114,57 @@ function num(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Targeted per-pid CPU/RSS sample (shares the sampler delta maps with `sampleProcesses`). */
+export interface PidSample {
+  cpuPercent: number | null;
+  memBytes: number;
+}
+
+/**
+ * Sample one pid (two file reads, never the 512-pid scan). CPU shares
+ * use the same delta timeline as `sampleProcesses` (null on the
+ * first poll or when the peer sample is missing); raced exits and
+ * unreadable files answer `null` (never throws).
+ */
+export async function samplePid(
+  deps: SysDeps,
+  sampler: MonitorSampler,
+  pid: number,
+): Promise<PidSample | null> {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  let stat: { utime: number; stime: number } | null = null;
+  let memBytes = 0;
+  try {
+    const raw = deps.readFile(`/proc/${pid}/stat`);
+    stat = raw === null ? null : parsePidStat(raw);
+    const statusRaw = deps.readFile(`/proc/${pid}/status`);
+    if (statusRaw !== null) memBytes = parsePidStatus(statusRaw).memBytes;
+  } catch {
+    return null;
+  }
+  if (stat === null) return null;
+  let sysTotal: number | null = null;
+  try {
+    const statText = deps.readFile('/proc/stat');
+    const aggregate = statText === null ? null : parseCpuLine(statText.split('\n')[0] ?? '');
+    sysTotal = aggregate === null ? null : aggregate.total;
+  } catch {
+    sysTotal = null;
+  }
+  const prev = sampler.prevPid.get(pid);
+  sampler.prevPid.set(pid, { utime: stat.utime, stime: stat.stime });
+  const sysDelta = sampler.prevSysTotal !== null && sysTotal !== null ? sysTotal - sampler.prevSysTotal : null;
+  if (sysTotal !== null) sampler.prevSysTotal = sysTotal;
+  const pidDelta = prev === undefined ? null : stat.utime + stat.stime - (prev.utime + prev.stime);
+  const ncpu = Math.max(1, cpuCores(deps));
+  return {
+    cpuPercent: pidDelta === null || sysDelta === null || sysDelta <= 0 || pidDelta < 0
+      ? null
+      : Math.round((pidDelta / sysDelta) * ncpu * 100),
+    memBytes,
+  };
+}
+
 /** Parse one `/proc/stat` cpu line into idle/total jiffies. */
 export function parseCpuLine(line: string): { idle: number; total: number } | null {
   const fields = line.trim().split(/\s+/).slice(1).map(Number);

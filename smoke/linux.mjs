@@ -68,7 +68,24 @@ const sitePort = process.env.SMOKE_SITE_PORT || 18901;
 check('site serves', execSync(`curl -s http://127.0.0.1:${sitePort}/`, { encoding: 'utf8' }) === 'SMOKE-NODE');
 const logs = json('GET', `/api/sites/${sid}/logs`);
 check('site logs live', logs.running === true);
+// per-site stats wave 14 (real node: pid + version + rss live)
+const listed = json('GET', '/api/sites').sites.find((s) => s.id === sid);
+check(
+  'site stats live',
+  listed.running === true &&
+    Number.isInteger(listed.pid) &&
+    typeof listed.engineVersion === 'string' &&
+    listed.engineVersion.includes('v') &&
+    typeof listed.memBytes === 'number' &&
+    listed.memBytes > 0 &&
+    (listed.cpuPercent === null || typeof listed.cpuPercent === 'number'),
+);
 check('site stop', json('POST', `/api/sites/${sid}/stop`).ok === true);
+const stopped = json('GET', '/api/sites').sites.find((s) => s.id === sid);
+check(
+  'site stats null when stopped',
+  stopped.pid === null && stopped.cpuPercent === null && stopped.memBytes === null && stopped.engineVersion === null,
+);
 check('site delete', json('POST', `/api/sites/${sid}/delete`).ok === true);
 
 // absolute paths outside the jail are always denied (resolve() semantics)

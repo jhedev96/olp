@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
+import { fmtSize } from '../lib/format.js';
 import { navigateTo } from '../lib/router.js';
 import { Badge } from '../components/common/Badge.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
@@ -16,7 +17,14 @@ export interface SiteRow {
   path: string;
   port: number;
   running: boolean;
+  pid: number | null;
+  cpuPercent: number | null;
+  memBytes: number | null;
+  engineVersion: string | null;
 }
+
+/** Stats poll cadence while any site runs (log-modal pattern). */
+export const SITE_POLL_MS = 5000;
 
 type SiteType = SiteRow['type'];
 const SITE_TYPES: SiteType[] = ['node', 'php', 'static', 'go'];
@@ -34,10 +42,11 @@ export interface ProxyRow {
 
 /**
  * Websites + Nginx reverse proxies (mockup websites parity): type tabs,
- * search + status filter, app cards with open-links, engine-card add
- * modal, nginx service buttons, proxy form + table. Honestly omitted
- * (no source, backend frozen): per-site engine version, PID, CPU/memory
- * (CAND-015), auto-restart toggle (CAND-020), per-site settings button
+ * search + status filter, app cards with open-links, per-card engine
+ * version + PID + CPU/memory lines with 5 s auto-poll while running,
+ * engine-card add modal, nginx service buttons, proxy form + table.
+ * Honestly omitted (no source, backend frozen): auto-restart toggle
+ * (CAND-020), per-site settings button
  * (no destination page exists), per-vhost SSL/toggles/conf edit/stats
  * (CAND-021), free-port probe (CAND-022), custom startup command
  * (CAND-023). List failures keep the previous render.
@@ -86,6 +95,15 @@ export function SitesPage(): ReactElement {
     void loadSites();
     void loadNginx();
   }, [loadSites, loadNginx]);
+
+  const anyRunning = sites.some((site) => site.running);
+  useEffect(() => {
+    if (!anyRunning) return undefined;
+    const timer = setInterval(() => {
+      void loadSites();
+    }, SITE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [anyRunning, loadSites]);
 
   const act = async (id: string, action: 'start' | 'stop' | 'restart'): Promise<void> => {
     await apiJson(`/api/sites/${id}/${action}`, { method: 'POST' }).catch(() => undefined);
@@ -239,7 +257,7 @@ export function SitesPage(): ReactElement {
               </div>
               <p className="font-mono text-xs text-neutral-400">{site.path}</p>
               <p className="mt-0.5 text-xs text-neutral-400">
-                {site.type} · port {site.port}
+                {site.engineVersion ?? site.type} · port {site.port}
                 {site.running && siteHost !== '' && (
                   <>
                     {' · '}
@@ -248,6 +266,11 @@ export function SitesPage(): ReactElement {
                     </a>
                   </>
                 )}
+              </p>
+              <p className="mt-0.5 font-mono text-xs text-neutral-500">
+                PID {site.pid ?? '—'} · CPU{' '}
+                {site.cpuPercent === null || site.cpuPercent === undefined ? '—' : `${site.cpuPercent}%`} · Mem{' '}
+                {site.memBytes === null || site.memBytes === undefined ? '—' : fmtSize(site.memBytes)}
               </p>
               <div className="mt-3 flex flex-wrap gap-1">
                 {site.running ? (

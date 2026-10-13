@@ -5,7 +5,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { detect } from '@olp/env-core';
 import type { Environment, PkgManId } from '@olp/env-core';
-import type { SysDeps } from '@olp/sysinfo';
+import type { MonitorSampler, SysDeps } from '@olp/sysinfo';
+import { createMonitorSampler, samplePid } from '@olp/sysinfo';
 import { createAuthContext, registerAuthRoutes, resolveDirs } from './auth.js';
 import type { AuthContext } from './auth.js';
 import type { PasskeyOps } from './passkey.js';
@@ -91,7 +92,14 @@ export interface ServerOptions {
   settingsRestart?: { exit(code: number): void; supervisor(): string };
   watchdogProbe?: WatchdogProbe;
   /** Kill deps override for monitor tests (production wires `process.*`). */
-  monitorKill?: KillDeps;  /** Controller factory override for services tests. */
+  monitorKill?: KillDeps;
+  /** Sampler override for monitor/sites tests (production shares one). */
+  monitorSampler?: MonitorSampler;
+  /** Per-pid stats override for sites tests (production samples `/proc`). */
+  siteProcStats?: (pid: number) => Promise<{ cpuPercent: number | null; memBytes: number } | null>;
+  /** Version-command override for sites tests (production execs with caps). */
+  siteRunVersion?: (command: string) => Promise<string | null>;
+  /** Controller factory override for services tests. */
   servicesControllerOf?: ServicesControllerOf;
   /** Passkey ceremony override for auth tests (production uses the real lib). */
   passkeyOps?: PasskeyOps;
@@ -126,7 +134,9 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   migrateLegacy(dataDir, legacyDir);
   registerAuthRoutes(app, auth);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
-  registerMonitorRoutes(app, { env, deps: sysDeps, root, kill: opts.monitorKill });
+  // One sampler shared by monitor + sites (single delta timeline).
+  const sampler: MonitorSampler = opts.monitorSampler ?? createMonitorSampler();
+  registerMonitorRoutes(app, { env, deps: sysDeps, root, kill: opts.monitorKill, sampler });
   registerServicesRoutes(app, { env, deps: sysDeps, controllerOf: opts.servicesControllerOf });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
   const siteStore = opts.siteStore ?? fileSiteStore(auth.dataDir);
@@ -136,6 +146,15 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     store: siteStore,
     spawner: opts.siteSpawner ?? realSpawner(),
     runtime: siteRuntime,
+    procStats: opts.siteProcStats ?? ((pid) => samplePid(sysDeps, sampler, pid)),
+    runVersion: opts.siteRunVersion ?? (async (command) => {
+      try {
+        const first = (await sysDeps.exec(command, 3000)).split('\n')[0]?.trim() ?? '';
+        return first === '' ? null : first.slice(0, 80);
+      } catch {
+        return null;
+      }
+    }),
   });
   registerProxyRoutes(app, {
     dataDir: auth.dataDir,

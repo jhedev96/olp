@@ -60,6 +60,7 @@ export { decideKill } from './kill.js';
 export type { KillDeps, KillSignal, KillVerdict } from './kill.js';
 export {
   createMonitorSampler,
+  samplePid,
   sampleProcesses,
   sampleSummary,
   parseBtime,
