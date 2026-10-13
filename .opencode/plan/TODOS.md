@@ -210,9 +210,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 24 — Per-site stats wave 14 (CPU/RSS/version; spec approved 2026-10-13)
 
-- [~] W14-00 planning: spec + tasks + todos (`SPECS/spec-sitestats-wave.md`, `TASKS/phase-24-sitestats-wave.md`)
-- [ ] W14-01 sysinfo samplePid + unit tests
-- [ ] W14-02 sites pid/version/stats + sampler share + tests
+- [x] W14-00 planning: spec + tasks + todos (`SPECS/spec-sitestats-wave.md`, `TASKS/phase-24-sitestats-wave.md`)
+- [x] W14-01 sysinfo samplePid + unit tests
+- [x] W14-02 sites pid/version/stats + sampler share + tests
 - [ ] W14-03 smoke extension + live ALL GREEN
-- [ ] W14-04 frontend cards + dashboard sum + tests
-- [ ] W14-05 docs + CAND-015 close
+- [x] W14-04 frontend cards + dashboard sum + tests
+- [x] W14-05 docs written (CAND-015 close PENDING live-smoke green — box OOM, 5 boots SIGKILLed)

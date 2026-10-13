@@ -75,6 +75,9 @@ Termux/Alpine/macOS hardware.
   validation + save/restart endpoints + localhost fallback +
   supervisor-aware restart with login redirect; settings editor
   wired; smoke save/restart-exit ALL GREEN (75 live).
+- Per-site stats wave 14 (code complete, live gate PENDING box
+  OOM): targeted `samplePid` + pid/version/stats list fields +
+  cards + dashboard RAM sum + restart wiring.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

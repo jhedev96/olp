@@ -22,7 +22,7 @@
 | CAND-012 | Self-hosted Geist + JetBrains Mono | none (asset weight decision) | System stack ships v1; revisit with size budget |
 | CAND-013 | Dashboard: live panel log tail (+copy/clear) | NEW: panel log tail endpoint (pm2/journald backends) | From P0b; pairs with watchdog-adjacent work, separate spec |
 | CAND-014 | ~~Extended system telemetry (temp, freq, zram, net I/O, sockets, per-core, disk rates, model/kernel/arch)~~ | Shipped wave 1: `GET /api/monitor/summary` (CLOSED 2026-10-12) | Wakelock line dropped with record (no queryable source); FS label out (no portable source) |
-| CAND-015 | Per-site memory + engine version (panel self-restart half DONE in wave 13 via `POST /api/server/restart`) | NEW: site process stats endpoint (authz design); self-restart shipped | From P0b dashboard read; site-stats half stays open |
+| CAND-015 | Per-site memory + engine version (panel self-restart half DONE in wave 13 via `POST /api/server/restart`) | Wave 14 code complete (samplePid + list fields + cards + RAM sum); live-smoke gate PENDING box OOM, merge gated on green | From P0b dashboard read; site-stats half implemented, awaiting behavioral proof |
 | CAND-016 | File mode/owner in listings + chmod editing | NEW: stat mode in file entries + chmod endpoint | From P0c files read (Chmod column, 0755/0644 strings, ACL card) |
 | CAND-017 | Terminal workspaces (multi-tab sessions, split panes, per-tab TTY) | NEW: multi-session manager + tab metadata (TTY, proc names) | From P0c terminal read; singleton manager today |
 | CAND-018 | WS latency indicator | EXTEND: ping/pong in WS protocol | From P0c terminal read (0.4ms badge); tiny protocol addition |
