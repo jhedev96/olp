@@ -12,6 +12,7 @@ import {
   hashPassword,
   loadConfig,
   loginCookie,
+  parseAuthConfig,
   parseCookies,
   parseUserAgent,
   saveConfig,
@@ -106,6 +107,14 @@ describe('config', () => {
   it('rejects corrupt salt/hash', () => {
     const io = memIo({ '/d/config.json': JSON.stringify({ username: 'a' }) });
     expect(() => loadConfig('/d', { io })).toThrow(/Invalid auth config/);
+  });
+
+  it('parses credentials without touching the fs', () => {
+    expect(parseAuthConfig(JSON.parse(JSON.stringify(cfg)))).toEqual(cfg);
+    expect(parseAuthConfig({ salt: 's', hash: 'h' }).username).toBe('admin');
+    for (const bad of [null, 'x', 42, [], {}, { username: 'a' }, { username: 'a', salt: '', hash: 'h' }, { username: 'a', salt: 's', hash: '' }]) {
+      expect(() => parseAuthConfig(bad)).toThrow(/Invalid auth config/);
+    }
   });
 
   it('migrates legacy bytes verbatim with owner-only write', () => {

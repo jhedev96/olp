@@ -107,6 +107,18 @@ function normalize(raw: unknown): AuthConfig {
 }
 
 /**
+ * Shape-validate unknown JSON into credentials (bundle-restore
+ * guard: corrupt backups must fail before any overwrite).
+ * Same rules as {@link loadConfig} without touching the fs.
+ *
+ * @throws When `salt`/`hash` are absent (fails closed).
+ */
+export function parseAuthConfig(raw: unknown): AuthConfig {
+  if (typeof raw !== 'object' || raw === null) throw new Error('Invalid auth config (missing salt/hash)');
+  return normalize(raw);
+}
+
+/**
  * Load credentials from `dataDir`, migrating from `legacyDir`
  * (`~/.termux-panel`) or generating first-run credentials when absent.
  */
