@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Environment } from '@olp/env-core';
@@ -186,6 +186,35 @@ describe('server files routes', () => {
     expect((await post('/api/delete', { path: 'd', name: 'm.txt' })).statusCode).toBe(200);
     const gone = await post('/api/read', { path: 'd', name: 'm.txt' });
     expect(gone.statusCode).toBe(400);
+  });
+
+  it('lists octal modes and chmods through the jail', async () => {
+    const { app, cookie, root } = authedServer();
+    const c = await cookie;
+    const post = (url: string, payload: unknown) => app.inject({ method: 'POST', url, headers: { cookie: c }, payload });
+    writeFileSync(join(root, 'm.txt'), 'm');
+    const listed = await app.inject({ method: 'GET', url: '/api/files?path=', headers: { cookie: c } });
+    const row = (listed.json() as { entries: Array<{ name: string; mode: unknown }> }).entries.find((e) => e.name === 'm.txt');
+    expect(typeof row?.mode).toBe('string');
+    expect(row?.mode).toMatch(/^[0-7]{4}$/);
+
+    for (const bad of [{ path: '', name: 'm.txt', mode: '999' }, { path: '', name: 'm.txt', mode: 'abc' }, { path: '', name: 'm.txt', mode: '' }, { path: '', name: 'm.txt' }]) {
+      const res = await post('/api/chmod', bad);
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('Invalid mode (octal, e.g. 0644)');
+    }
+    expect((await post('/api/chmod', { path: '', name: 'nope.txt', mode: '0644' })).statusCode).toBe(400);
+    expect((await post('/api/chmod', { path: '', name: 'm.txt', mode: '0600' })).json()).toEqual({ ok: true });
+    expect(statSync(join(root, 'm.txt')).mode & 0o777).toBe(0o600);
+    const relisted = await app.inject({ method: 'GET', url: '/api/files?path=', headers: { cookie: c } });
+    expect((relisted.json() as { entries: Array<{ name: string; mode: unknown }> }).entries.find((e) => e.name === 'm.txt')?.mode).toBe('0600');
+    expect((await app.inject({ method: 'POST', url: '/api/chmod', headers: { cookie: c }, payload: { path: '', name: 'm.txt', mode: '0644' } })).statusCode).toBe(200);
+
+    symlinkSync(join(root, 'm.txt'), join(root, 'link.txt'));
+    const link = await post('/api/chmod', { path: '', name: 'link.txt', mode: '0644' });
+    expect(link.statusCode).toBe(400);
+    expect(link.json().error).toBe('Symlinks cannot be chmodded');
+    expect((await app.inject({ method: 'POST', url: '/api/chmod', payload: { path: '', name: 'm.txt', mode: '0644' } })).statusCode).toBe(401);
   });
 
   it('refuses oversized reads and non-string writes', async () => {
