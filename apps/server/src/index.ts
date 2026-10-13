@@ -82,6 +82,7 @@ export interface ServerOptions {
   storePrefix?: string;
   storeManager?: PkgManId;
   storeReadSource?: (path: string) => string | null;
+  storeListDir?: (dir: string) => string[];
   storeDns?: (host: string) => Promise<unknown>;
   settingsStore?: SettingsStore;
   telegramApi?: TelegramApi;
@@ -267,6 +268,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     exec: opts.storeExec,
     spawnShell: opts.storeSpawn ?? realSpawnShell,
     readSourceFile: opts.storeReadSource,
+    listSourceDir: opts.storeListDir,
     dnsLookup: opts.storeDns,
     notify: opts.storeNotify ?? notifyTelegram,
   });

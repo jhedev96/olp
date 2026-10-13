@@ -404,4 +404,144 @@ describe('server store routes', () => {
     });
     expect((await app3.inject({ method: 'GET', url: '/api/install/mirror' })).statusCode).toBe(401);
   });
+
+  it('resolves mirrors per environment from native files', async () => {
+    const files: Record<string, string> = {
+      '/etc/apt/sources.list': '# empty — custom wins\n',
+      '/etc/apt/sources.list.d/custom.list': 'deb https://mirror.example.com/debian/ stable main\n',
+      '/etc/pacman.d/mirrorlist': '# comment\nServer = https://arch.example.com/$repo/os/$arch\n',
+      '/etc/apk/repositories': '@edge https://alpine.example.com/edge/main\n',
+      '/etc/yum.repos.d/base.repo': '[base]\nname=Base\nbaseurl=https://yum.example.com/fedora/$releasever/os/\n',
+      '/etc/yum.repos.d/meta.repo': '[fedora]\nmetalink=https://mirrors.fedoraproject.org/metalink?repo=fedora-40\n',
+    };
+    const build = (env: EnvId, manager: 'apt' | 'pacman' | 'apk' | 'dnf', execImpl?: (cmd: string) => Promise<string>) => {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+      const { spawn } = makeSpawn();
+      return buildServer({
+        dataDir,
+        legacyDir,
+        env: makeEnv(env),
+        sysDeps: quietDeps(),
+        root,
+        storeCheck: () => Promise.resolve(false),
+        storeSpawn: spawn,
+        storeManager: manager,
+        storeExec: execImpl,
+        storeReadSource: (path) => files[path] ?? null,
+        storeListDir: (dir) =>
+          Object.keys(files)
+            .filter((p) => p.startsWith(`${dir}/`))
+            .map((p) => p.slice(dir.length + 1)),
+        storeDns: () => Promise.resolve({}),
+      });
+    };
+    const mirrorOf = async (env: EnvId, manager: 'apt' | 'pacman' | 'apk' | 'dnf') => {
+      const { app } = build(env, manager);
+      const cookie = await authedCookie(app);
+      return (await app.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie } })).json() as {
+        manager: string | null;
+        mirror: string | null;
+        latencyMs: number | null;
+      };
+    };
+    // First file hit wins (custom.list beats the empty main file).
+    expect(await mirrorOf('debian', 'apt')).toMatchObject({ manager: 'apt', mirror: 'mirror.example.com' });
+    expect(typeof (await mirrorOf('debian', 'apt')).latencyMs).toBe('number');
+    expect(await mirrorOf('arch', 'pacman')).toMatchObject({ manager: 'pacman', mirror: 'arch.example.com' });
+    expect(await mirrorOf('alpine', 'apk')).toMatchObject({ manager: 'apk', mirror: 'alpine.example.com' });
+    expect(await mirrorOf('fedora', 'dnf')).toMatchObject({ manager: 'dnf', mirror: 'yum.example.com' });
+
+    // Brew attempt: happy path, exec failure, and unsafe path all covered.
+    const brewFiles = { ...files, '/usr/local/Homebrew/.git/config': '[remote "origin"]\n\turl = git@github.com:Homebrew/brew.git\n' };
+    const brewBuild = (execImpl?: (cmd: string) => Promise<string>) => {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+      const { spawn } = makeSpawn();
+      return buildServer({
+        dataDir,
+        legacyDir,
+        env: makeEnv('macos'),
+        sysDeps: quietDeps(),
+        root,
+        storeCheck: () => Promise.resolve(false),
+        storeSpawn: spawn,
+        storeManager: 'brew',
+        storeExec: execImpl,
+        storeReadSource: (path) => brewFiles[path] ?? null,
+        storeListDir: () => [],
+        storeDns: () => Promise.resolve({}),
+      });
+    };
+    const brewHappy = brewBuild(() => Promise.resolve('/usr/local/Homebrew\n'));
+    const brewCookie = await authedCookie(brewHappy.app);
+    expect((await brewHappy.app.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie: brewCookie } })).json()).toMatchObject({
+      manager: 'brew',
+      mirror: 'github.com',
+    });
+    const brewFail = brewBuild(() => Promise.reject(new Error('no brew')));
+    const brewFailCookie = await authedCookie(brewFail.app);
+    expect((await brewFail.app.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie: brewFailCookie } })).json()).toMatchObject({
+      manager: 'brew',
+      mirror: null,
+      latencyMs: null,
+    });
+    const brewEvil = brewBuild(() => Promise.resolve('/tmp/../evil\n'));
+    const brewEvilCookie = await authedCookie(brewEvil.app);
+    expect((await brewEvil.app.inject({ method: 'GET', url: '/api/install/mirror', headers: { cookie: brewEvilCookie } })).json()).toMatchObject({
+      mirror: null,
+    });
+  });
+
+  it('runs cache purge with busy and unavailable guards', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawn, runs } = makeSpawn();
+    const noted: string[] = [];
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: makeEnv('termux'),
+      sysDeps: quietDeps(),
+      root,
+      storeCheck: () => Promise.resolve(false),
+      storeSpawn: spawn,
+      storeNotify: (text) => {
+        noted.push(text);
+      },
+    });
+    const cookie = await authedCookie(app);
+    expect((await app.inject({ method: 'GET', url: '/api/install/purge/log', headers: { cookie } })).json()).toEqual({
+      logs: '',
+      running: false,
+      exitCode: null,
+    });
+    expect((await app.inject({ method: 'POST', url: '/api/install/purge/start', headers: { cookie } })).json()).toEqual({ ok: true });
+    expect(runs[0]?.cmd).toBe('pkg clean');
+    const busy = await app.inject({ method: 'POST', url: '/api/install/purge/start', headers: { cookie } });
+    expect(busy.statusCode).toBe(400);
+    expect(busy.json()).toEqual({ error: 'Cache purge already running' });
+    runs[0]?.done(0);
+    expect((await app.inject({ method: 'GET', url: '/api/install/purge/log', headers: { cookie } })).json()).toMatchObject({
+      running: false,
+      exitCode: 0,
+    });
+    expect(noted).toEqual(['✅ Cache purge finished (exit 0)']);
+    expect((await app.inject({ method: 'POST', url: '/api/install/purge/start' })).statusCode).toBe(401);
+  });
+
+  it('keeps purge off the parametric id with honest unavailability', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawn } = makeSpawn();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: makeEnv('windows'),
+      sysDeps: quietDeps(),
+      root,
+      storeCheck: () => Promise.resolve(false),
+      storeSpawn: spawn,
+    });
+    const cookie = await authedCookie(app);
+    expect((await app.inject({ method: 'POST', url: '/api/install/purge/start', headers: { cookie } })).json()).toEqual({
+      error: 'Cache purge unavailable for windows',
+    });
+  });
 });
