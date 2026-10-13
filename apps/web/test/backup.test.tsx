@@ -131,8 +131,7 @@ describe('web backup page', () => {
     expect(screen.getByText('m1')).not.toBeNull();
   });
 
-  it('verifies archives, uploads and manages schedules', async () => {
-    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  it('verifies archives, uploads and manages schedules', async () => {    const calls: Array<{ url: string; method: string; body: unknown }> = [];
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
       const body = init?.body !== undefined && typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
       calls.push({ url, method: init?.method ?? 'GET', body });
@@ -170,5 +169,114 @@ describe('web backup page', () => {
       fireEvent.click(screen.getByText('Add schedule'));
     });
     expect(calls.some((c) => c.url === '/api/backups/schedules' && c.method === 'POST')).toBe(true);
+  });
+
+  it('snapshots full systems from a checklist dialog', async () => {
+    const { calls } = stubApi((url, method) => {
+      if (url === '/api/db/mysql/databases') return { status: 200, json: { databases: ['appdb', 'blog'] } };
+      if (url === '/api/db/postgres/databases') return { status: 400, json: { error: 'Not connected' } };
+      if (url === '/api/bundles' && method === 'GET') return { status: 200, json: { bundles: [] } };
+      if (url === '/api/bundles' && method === 'POST') return { status: 200, json: { ok: true, id: 'bundle-1' } };
+      if (url === '/api/bundles/bundle-1') {
+        return {
+          status: 200,
+          json: {
+            bundle: null,
+            job: { id: 'bundle-1', state: 'done', steps: [{ key: 'enumerate', label: 'Discover databases', status: 'ok', detail: 'mysql: 1' }], started: 1, finished: 2 },
+          },
+        };
+      }
+      if (url === '/api/stats') return { status: 200, json: {} };
+      if (url === '/api/install') return { status: 200, json: { items: [] } };
+      if (url === '/api/backups/schedules') return { status: 200, json: { schedules: [] } };
+      return { status: 200, json: BACKUPS };
+    });
+    await act(async () => {
+      render(<BackupPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Start full snapshot'));
+    });
+    const bundleDialog = screen.getByRole('dialog');
+    await waitFor(() => {
+      expect(within(bundleDialog).getByText('appdb')).not.toBeNull();
+    });
+    expect(within(bundleDialog).getByText('blog')).not.toBeNull();
+    expect(within(bundleDialog).getByText(/Not connected/)).not.toBeNull();
+    const boxes = within(bundleDialog).getAllByRole('checkbox');
+    expect(boxes).toHaveLength(4);
+    fireEvent.click(boxes[1] as HTMLElement);
+    await act(async () => {
+      fireEvent.click(within(bundleDialog).getByText('Start snapshot'));
+    });
+    const post = calls.find((c) => c.url === '/api/bundles' && c.method === 'POST');
+    expect(post?.body).toEqual({ databases: { mysql: ['appdb'], postgres: [] }, configs: true, crons: true });
+    await waitFor(() => {
+      expect(calls.some((c) => c.url === '/api/bundles/bundle-1')).toBe(true);
+    });
+  });
+
+  it('restore-alls behind a danger dialog with live steps', async () => {
+    const bundle = {
+      id: 'bundle-9',
+      created: 5,
+      parts: [
+        { name: 'bundle-9--mysql-appdb', file: 'bundle-9--mysql-appdb.sql.gz', kind: 'mysql', sha256: 'a' },
+        { name: 'bundle-9--configs', file: 'bundle-9--configs.zip', kind: 'configs', sha256: 'b' },
+      ],
+    };
+    const { calls } = stubApi((url, method) => {
+      if (url === '/api/bundles' && method === 'GET') return { status: 200, json: { bundles: [bundle] } };
+      if (url === '/api/bundles/bundle-9/restore') return { status: 200, json: { ok: true, id: 'restore-1' } };
+      if (url === '/api/bundles/restores/restore-1') {
+        return {
+          status: 200,
+          json: {
+            job: {
+              id: 'restore-1',
+              state: 'done',
+              steps: [{ key: 'restore-configs', label: 'Restore configs', status: 'ok', detail: '1 files applied' }],
+              started: 1,
+              finished: 2,
+            },
+          },
+        };
+      }
+      if (url.endsWith('/verify')) return { status: 200, json: { ok: true, sha256: 'ab'.repeat(32), match: true } };
+      if (url === '/api/stats') return { status: 200, json: {} };
+      if (url === '/api/install') return { status: 200, json: { items: [] } };
+      if (url === '/api/backups/schedules') return { status: 200, json: { schedules: [] } };
+      return { status: 200, json: BACKUPS };
+    });
+    await act(async () => {
+      render(<BackupPage />);
+    });
+    expect(screen.getByText('bundle-9')).not.toBeNull();
+    expect(screen.getByText(/1 db/)).not.toBeNull();
+    const item = (screen.getByText('bundle-9').closest('li') as HTMLElement) ?? document.body;
+    await act(async () => {
+      fireEvent.click(within(item).getByText('Restore all'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('drops and recreates');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Restore all' }));
+    });
+    expect(calls.some((c) => c.url === '/api/bundles/bundle-9/restore' && c.method === 'POST')).toBe(true);
+    await waitFor(() => {
+      expect(screen.getByText(/1 files applied/)).not.toBeNull();
+    });
+    expect(screen.getByText('Dismiss')).not.toBeNull();
+    // Per-part reuse: download link, verify badge, single-part restore dialog.
+    const downloads = within(item).getAllByText('Download');
+    expect(downloads.map((d) => (d as HTMLAnchorElement).getAttribute('href'))).toContain('/api/backups/bundle-9--configs/download');
+    await act(async () => {
+      fireEvent.click(within(item).getAllByText('Verify')[0] as HTMLElement);
+    });
+    expect(within(item).getByText('SHA256 OK')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(within(item).getByText('Restore'));
+    });
+    expect(screen.getByRole('dialog').textContent).toContain('may be overwritten');
   });
 });

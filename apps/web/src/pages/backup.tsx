@@ -42,7 +42,42 @@ export interface VerifyState {
   match: boolean | null;
 }
 
+/** `/api/bundles` manifest shape (server contract). */
+export interface BundlePartRow {
+  name: string;
+  file: string;
+  kind: 'mysql' | 'postgres' | 'configs' | 'crons';
+  sha256: string;
+}
+
+/** `/api/bundles` row shape. */
+export interface BundleRow {
+  id: string;
+  created: number;
+  parts: BundlePartRow[];
+}
+
+/** Bundle job step shape (snapshot + restore share it). */
+export interface BundleStepRow {
+  key: string;
+  label: string;
+  status: 'pending' | 'running' | 'ok' | 'failed';
+  detail: string;
+}
+
+/** Bundle job shape (`GET /api/bundles/:id` + `/api/bundles/restores/:id`). */
+export interface BundleJobRow {
+  id: string;
+  state: 'running' | 'done' | 'failed';
+  steps: BundleStepRow[];
+  started: number;
+  finished: number | null;
+}
+
 const BACKUP_TYPES = ['folder', 'mysql', 'postgres'] as const;
+const BUNDLE_ENGINES = ['mysql', 'postgres'] as const;
+/** Live step poll cadence (documented; jobs run server-side). */
+const BUNDLE_POLL_MS = 2000;
 
 /**
  * Backups (mockup backup parity): stats header, storage pool, engine
@@ -50,9 +85,11 @@ const BACKUP_TYPES = ['folder', 'mysql', 'postgres'] as const;
  * gzip dumps, archive upload, scheduled snapshots with last-run, and
  * dialog-gated destructive actions. Engine chips resolve via the
  * install catalog (`mysqldump` ships with mysql, `pg_dump` with
- * postgres — documented assumption). Full-system bundle stays out
- * (CAND-035); auto-prune stays out (retention design needed). Restore
- * uses the stored default target (empty body, Terwo parity).
+ * postgres — documented assumption). Full-system bundles ship as a
+ * manifest + parts card (snapshot checklist dialog, bundles list with
+ * per-part verify/download, danger-guarded restore-all with live
+ * step poll); auto-prune stays out (retention design needed).
+ * Restore uses the stored default target (empty body, Terwo parity).
  */
 export function BackupPage(): ReactElement {
   const [backups, setBackups] = useState<BackupRow[]>([]);
@@ -70,6 +107,15 @@ export function BackupPage(): ReactElement {
   const [schedules, setSchedules] = useState<BackupScheduleRow[]>([]);
   const [schedForm, setSchedForm] = useState({ name: '', type: 'folder', source: '', schedule: '0 2 * * *' });
   const [uploadType, setUploadType] = useState('folder');
+  const [bundles, setBundles] = useState<BundleRow[]>([]);
+  const [showBundleDialog, setShowBundleDialog] = useState(false);
+  const [discovered, setDiscovered] = useState<Record<string, string[] | null>>({ mysql: null, postgres: null });
+  const [checked, setChecked] = useState<Record<string, Record<string, boolean>>>({ mysql: {}, postgres: {} });
+  const [includeConfigs, setIncludeConfigs] = useState(true);
+  const [includeCrons, setIncludeCrons] = useState(true);
+  const [activeSnapshot, setActiveSnapshot] = useState<BundleJobRow | null>(null);
+  const [pendingBundleRestore, setPendingBundleRestore] = useState<BundleRow | null>(null);
+  const [restoreStatus, setRestoreStatus] = useState<{ bundleId: string; job: BundleJobRow } | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -225,6 +271,144 @@ export function BackupPage(): ReactElement {
     setPendingDelete(null);
     await apiJson(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => undefined);
     await load();
+  };
+
+  const loadBundles = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ bundles?: BundleRow[] }>('/api/bundles');
+      setBundles(Array.isArray(body.bundles) ? body.bundles : []);
+    } catch {
+      // bundles list keeps its previous render
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBundles();
+  }, [loadBundles]);
+
+  const openBundleDialog = (): void => {
+    setDiscovered({ mysql: null, postgres: null });
+    setShowBundleDialog(true);
+    for (const engine of BUNDLE_ENGINES) {
+      void apiJson<{ databases?: unknown }>(`/api/db/${engine}/databases`)
+        .then((body) => {
+          const list = Array.isArray(body.databases) ? body.databases.filter((db): db is string => typeof db === 'string') : [];
+          setDiscovered((prev) => ({ ...prev, [engine]: list }));
+          setChecked((prev) => {
+            const next: Record<string, boolean> = { ...(prev[engine] ?? {}) };
+            for (const db of list) {
+              if (!(db in next)) next[db] = true;
+            }
+            return { ...prev, [engine]: next };
+          });
+        })
+        .catch(() => {
+          // engine stays null: not connected, honestly skipped
+        });
+    }
+  };
+
+  const pollSnapshot = useCallback(
+    async (id: string): Promise<void> => {
+      try {
+        const body = await apiJson<{ bundle?: BundleRow | null; job?: BundleJobRow | null }>(`/api/bundles/${encodeURIComponent(id)}`);
+        if (body.job !== null && body.job !== undefined) {
+          if (body.job.state === 'running') {
+            setActiveSnapshot(body.job);
+          } else {
+            setActiveSnapshot(null);
+            await loadBundles();
+            await load();
+          }
+        }
+      } catch {
+        // next tick retries
+      }
+    },
+    [load, loadBundles],
+  );
+
+  useEffect(() => {
+    if (activeSnapshot === null) return;
+    const id = activeSnapshot.id;
+    const timer = setInterval(() => {
+      void pollSnapshot(id);
+    }, BUNDLE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [activeSnapshot, pollSnapshot]);
+
+  const startBundle = async (): Promise<void> => {
+    setError('');
+    const databases: { mysql: string[]; postgres: string[] } = { mysql: [], postgres: [] };
+    for (const engine of BUNDLE_ENGINES) {
+      const list = discovered[engine] ?? [];
+      databases[engine as 'mysql' | 'postgres'] = list.filter((db) => checked[engine]?.[db] === true);
+    }
+    try {
+      const body = await apiJson<{ ok?: unknown; error?: string; id?: unknown }>('/api/bundles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ databases, configs: includeConfigs, crons: includeCrons }),
+      });
+      if (typeof body.id !== 'string') {
+        setError(typeof body.error === 'string' ? body.error : 'Snapshot failed to start');
+        return;
+      }
+      setShowBundleDialog(false);
+      setActiveSnapshot({ id: body.id, state: 'running', steps: [], started: Date.now(), finished: null });
+      await pollSnapshot(body.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Snapshot failed to start');
+    }
+  };
+
+  const pollRestore = useCallback(async (bundleId: string, rid: string): Promise<void> => {
+    try {
+      const body = await apiJson<{ job?: BundleJobRow }>(`/api/bundles/restores/${encodeURIComponent(rid)}`);
+      if (body.job !== undefined) setRestoreStatus({ bundleId, job: body.job });
+    } catch {
+      // next tick retries
+    }
+  }, []);
+
+  useEffect(() => {
+    if (restoreStatus === null || restoreStatus.job.state !== 'running') return;
+    const { bundleId, job } = restoreStatus;
+    const timer = setInterval(() => {
+      void pollRestore(bundleId, job.id);
+    }, BUNDLE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [restoreStatus, pollRestore]);
+
+  const confirmBundleRestore = async (): Promise<void> => {
+    if (pendingBundleRestore === null) return;
+    const bundleId = pendingBundleRestore.id;
+    setPendingBundleRestore(null);
+    setError('');
+    try {
+      const body = await apiJson<{ ok?: unknown; error?: string; id?: unknown }>(`/api/bundles/${encodeURIComponent(bundleId)}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (typeof body.id !== 'string') {
+        setError(typeof body.error === 'string' ? body.error : 'Restore failed to start');
+        return;
+      }
+      setRestoreStatus({ bundleId, job: { id: body.id, state: 'running', steps: [], started: Date.now(), finished: null } });
+      await pollRestore(bundleId, body.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Restore failed to start');
+    }
+  };
+
+  const verifyPart = async (name: string): Promise<void> => {
+    try {
+      const body = await apiJson<VerifyState & { ok?: unknown }>(`/api/backups/${encodeURIComponent(name)}/verify`);
+      setVerifyMap((prev) => ({ ...prev, [name]: { sha256: body.sha256, match: body.match } }));
+    } catch {
+      // badge stays absent; errors surface on the archive table instead
+    }
   };
 
   const q = query.trim().toLowerCase();
@@ -428,6 +612,175 @@ export function BackupPage(): ReactElement {
         destructive={true}
         onConfirm={() => void confirmRemove()}
         onCancel={() => setPendingDelete(null)}
+      />
+      <div className="mt-3">
+        <Card>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h2 className="mr-auto font-bold">Full system snapshots</h2>
+            <Button size="sm" onClick={() => openBundleDialog()}>
+              Start full snapshot
+            </Button>
+          </div>
+          {activeSnapshot !== null && (
+            <div className="mb-2 rounded border border-neutral-800 px-2 py-1.5 text-sm" aria-live="polite">
+              <p className="font-medium">Snapshot running…</p>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {activeSnapshot.steps.map((step) => (
+                  <li key={step.key} className="font-mono text-xs text-neutral-400">
+                    {step.status === 'ok' ? '✓' : step.status === 'failed' ? '✗' : '…'} {step.label}
+                    {step.detail !== '' && <span className="text-neutral-500"> — {step.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {bundles.length === 0 ? (
+            <p className="text-sm text-neutral-400">No full-system bundles yet — one click snapshots every database plus configs and cron jobs.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {bundles.map((bundle) => (
+                <li key={bundle.id} className="rounded border border-neutral-800 px-2 py-1.5 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="mr-auto font-mono text-xs">{bundle.id}</span>
+                    <span className="text-xs text-neutral-400">{fmtDate(bundle.created)}</span>
+                    <span className="text-xs text-neutral-400">
+                      {bundle.parts.filter((p) => p.kind === 'mysql' || p.kind === 'postgres').length} db ·{' '}
+                      {bundle.parts.some((p) => p.kind === 'configs') ? 'configs' : 'no configs'} ·{' '}
+                      {bundle.parts.some((p) => p.kind === 'crons') ? 'crons' : 'no crons'}
+                    </span>
+                    <Button size="sm" variant="destructive" onClick={() => setPendingBundleRestore(bundle)}>
+                      Restore all
+                    </Button>
+                  </div>
+                  <ul className="mt-1 flex flex-col gap-1">
+                    {bundle.parts.map((part) => {
+                      const verified = verifyMap[part.name];
+                      const kind = part.kind;
+                      const restorableKind = kind === 'mysql' || kind === 'postgres' ? kind : null;
+                      return (
+                        <li key={part.name} className="flex flex-wrap items-center gap-2 font-mono text-xs text-neutral-400">
+                          <span>
+                            {part.kind}: {part.file}
+                          </span>
+                          <a className="text-green-400" href={`/api/backups/${encodeURIComponent(part.name)}/download`}>
+                            Download
+                          </a>
+                          <Button size="sm" variant="outline" onClick={() => void verifyPart(part.name)}>
+                            Verify
+                          </Button>
+                          {verified !== undefined && verified !== null && (
+                            <Badge tone={verified.match === false ? 'danger' : 'success'}>
+                              {verified.match === null ? 'hash, unverified' : verified.match ? 'SHA256 OK' : 'MISMATCH'}
+                            </Badge>
+                          )}
+                          {restorableKind !== null && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                setPendingRestore({ name: part.name, file: part.file, type: restorableKind, source: '', size: 0, mtime: 0, created: bundle.created })
+                              }
+                            >
+                              Restore
+                            </Button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {restoreStatus !== null && restoreStatus.bundleId === bundle.id && (
+                    <div className="mt-1 rounded border border-red-900 px-2 py-1.5" aria-live="polite">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="mr-auto text-xs font-medium">
+                          Restore {restoreStatus.job.state === 'running' ? 'running…' : restoreStatus.job.state === 'done' ? 'done' : 'failed'}
+                        </p>
+                        {restoreStatus.job.state !== 'running' && (
+                          <Button size="sm" variant="outline" onClick={() => setRestoreStatus(null)}>
+                            Dismiss
+                          </Button>
+                        )}
+                      </div>
+                      <ul className="mt-1 flex flex-col gap-0.5">
+                        {restoreStatus.job.steps.map((step) => (
+                          <li key={step.key} className="font-mono text-xs text-neutral-400">
+                            {step.status === 'ok' ? '✓' : step.status === 'failed' ? '✗' : '…'} {step.label}
+                            {step.detail !== '' && <span className="text-neutral-500"> — {step.detail}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      {showBundleDialog && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-label="Full system snapshot">
+          <div className="w-full max-w-lg rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+            <h2 className="mb-2 font-bold">Full system snapshot</h2>
+            {BUNDLE_ENGINES.map((engine) => {
+              const list = discovered[engine] ?? null;
+              return (
+                <div key={engine} className="mb-2">
+                  <p className="text-sm font-medium">{engine}</p>
+                  {list === null ? (
+                    <p className="text-xs text-neutral-500">Not connected — skipped. Connect in Database first to include {engine} dumps.</p>
+                  ) : list.length === 0 ? (
+                    <p className="text-xs text-neutral-500">No user databases.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {list.map((db) => (
+                        <li key={db}>
+                          <label className="flex items-center gap-2 text-sm text-neutral-300">
+                            <input
+                              type="checkbox"
+                              checked={checked[engine]?.[db] === true}
+                              onChange={(ev) =>
+                                setChecked((prev) => ({ ...prev, [engine]: { ...(prev[engine] ?? {}), [db]: ev.target.checked } }))
+                              }
+                            />
+                            <span className="font-mono text-xs">{db}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+            <label className="flex items-center gap-2 text-sm text-neutral-300">
+              <input type="checkbox" checked={includeConfigs} onChange={(ev) => setIncludeConfigs(ev.target.checked)} />
+              Include configs (sites, credentials, settings, proxies)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-neutral-300">
+              <input type="checkbox" checked={includeCrons} onChange={(ev) => setIncludeCrons(ev.target.checked)} />
+              Include cron jobs
+            </label>
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" onClick={() => void startBundle()}>
+                Start snapshot
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setShowBundleDialog(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      <ConfirmDialog
+        open={pendingBundleRestore !== null}
+        title="Restore full system"
+        message={
+          pendingBundleRestore === null
+            ? ''
+            : `Restore bundle "${pendingBundleRestore.id}"? This drops and recreates every bundled database, overwrites panel configs, and re-adds missing cron jobs. Current data may be lost.`
+        }
+        confirmLabel="Restore all"
+        destructive={true}
+        onConfirm={() => void confirmBundleRestore()}
+        onCancel={() => setPendingBundleRestore(null)}
       />
       <div className="mt-3">
         <Card>
