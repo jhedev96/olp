@@ -106,6 +106,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
   const [activeTab, setActiveTab] = useState(0);
   const [editorError, setEditorError] = useState('');
   const [preview, setPreview] = useState<{ name: string; kind: 'image' | 'code'; content?: string } | null>(null);
+  const [sideView, setSideView] = useState<'editor' | 'preview'>('editor');
   const [newName, setNewName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
@@ -257,6 +258,8 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
     const existing = tabs.findIndex((t) => t.name === name);
     if (existing !== -1) {
       setActiveTab(existing);
+      setPreview(null);
+      setSideView('editor');
       return;
     }
     setEditorError('');
@@ -269,6 +272,8 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
       if (typeof body.content === 'string') {
         setTabs((prev) => [...prev, { name, content: body.content as string, original: body.content as string }]);
         setActiveTab(tabs.length);
+        setPreview(null);
+        setSideView('editor');
       } else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
       setEditorError(err instanceof ApiError ? err.message : 'Failed');
@@ -333,6 +338,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
   const openPreview = async (name: string): Promise<void> => {
     if (isImage(name)) {
       setPreview({ name, kind: 'image' });
+      setSideView('preview');
       return;
     }
     setEditorError('');
@@ -342,8 +348,10 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: dir, name }),
       });
-      if (typeof body.content === 'string') setPreview({ name, kind: 'code', content: body.content });
-      else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
+      if (typeof body.content === 'string') {
+        setPreview({ name, kind: 'code', content: body.content });
+        setSideView('preview');
+      } else setEditorError(typeof body.error === 'string' ? body.error : 'Failed');
     } catch (err) {
       setEditorError(err instanceof ApiError ? err.message : 'Failed');
     }
@@ -390,6 +398,20 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
   };
 
   const tab = tabs[activeTab];
+  const panelOpen = tabs.length > 0 || preview !== null;
+  const showEditor = tabs.length > 0 && (preview === null || sideView === 'editor');
+  const showPreview = preview !== null && !showEditor;
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key !== 'Escape') return;
+      if (showPreview) setPreview(null);
+      else closeTab(activeTab);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   return (
     <main className="p-4">
@@ -502,6 +524,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
           </span>
         ))}
       </div>
+      <div className={panelOpen ? 'grid grid-cols-1 items-start gap-3 lg:grid-cols-2' : ''}>
       <Card className="p-0">
         <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm">
@@ -611,12 +634,20 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
         </table>
         </div>
       </Card>
-      <div className="mt-3">
-        <ComingSoon feature="Storage mounts & shortcuts" candidate="CAND-019" />
-      </div>
-      {tabs.length > 0 && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4">
-          <div className="flex max-h-full w-full max-w-2xl flex-col rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+      {panelOpen && (
+        <section aria-label="Code panel" className="min-w-0 rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+          {tabs.length > 0 && preview !== null && (
+            <div className="mb-2 flex gap-2" role="tablist" aria-label="Panel view">
+              <Button size="sm" variant={showEditor ? 'default' : 'outline'} onClick={() => setSideView('editor')}>
+                Editor
+              </Button>
+              <Button size="sm" variant={showPreview ? 'default' : 'outline'} onClick={() => setSideView('preview')}>
+                Preview
+              </Button>
+            </div>
+          )}
+          {showEditor && (
+            <div className="flex flex-col">
             <div className="mb-2 flex flex-wrap gap-1" role="tablist" aria-label="Open files">
               {tabs.map((t, i) => (
                 <span
@@ -722,9 +753,33 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
                 )}
               </div>
             )}
-          </div>
-        </div>
+            </div>
+          )}
+          {showPreview && preview !== null && (
+            <div className="flex flex-col">
+              <h2 className="mb-2 font-mono text-sm font-bold">{preview.name}</h2>
+              {preview.kind === 'image' ? (
+                <img
+                  src={`/api/files/preview?path=${encodeURIComponent(dir === '' ? preview.name : `${dir}/${preview.name}`)}`}
+                  alt={preview.name}
+                  className="max-h-full max-w-full"
+                />
+              ) : (
+                <CodePreview filename={preview.name} code={preview.content ?? ''} />
+              )}
+              <div className="mt-2">
+                <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
       )}
+      </div>
+      <div className="mt-3">
+        <ComingSoon feature="Storage mounts & shortcuts" candidate="CAND-019" />
+      </div>
       <ConfirmDialog
         open={pendingDelete !== null}
         title="Delete file"
@@ -760,27 +815,6 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
         onSubmit={confirmTouch}
         onCancel={() => setPromptTouch(false)}
       />
-      {preview !== null && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreview(null)}>
-          {preview.kind === 'image' ? (
-            <img
-              src={`/api/files/preview?path=${encodeURIComponent(dir === '' ? preview.name : `${dir}/${preview.name}`)}`}
-              alt={preview.name}
-              className="max-h-full max-w-full"
-            />
-          ) : (
-            <div className="w-full max-w-2xl rounded-lg border border-neutral-800 bg-neutral-900 p-4" onClick={(ev) => ev.stopPropagation()}>
-              <h2 className="mb-2 font-mono text-sm font-bold">{preview.name}</h2>
-              <CodePreview filename={preview.name} code={preview.content ?? ''} />
-              <div className="mt-2">
-                <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </main>
   );
 }
