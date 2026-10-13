@@ -14,6 +14,7 @@ import { nodeDeps, registerStatsRoutes } from './stats.js';
 import { registerMonitorRoutes } from './monitor.js';
 import type { KillDeps } from '@olp/sysinfo';
 import { registerFilesRoutes } from './files.js';
+import { registerMountsRoutes } from './mounts.js';
 import { TerminalManager, realBackendFactory, registerTerminalRoutes } from './terminal.js';
 import type { TermBackendFactory } from './terminal.js';
 import { fileSiteStore, realSpawner, registerSitesRoutes } from './sites.js';
@@ -141,6 +142,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
   registerMonitorRoutes(app, { env, deps: sysDeps, root, kill: opts.monitorKill, sampler });
   registerServicesRoutes(app, { env, deps: sysDeps, controllerOf: opts.servicesControllerOf });
   registerFilesRoutes(app, { root, exec: sysDeps.exec });
+  registerMountsRoutes(app, { env, root, home: homedir() });
   const siteStore = opts.siteStore ?? fileSiteStore(auth.dataDir);
   const siteRuntime = createSiteRuntime();
   registerSitesRoutes(app, {
