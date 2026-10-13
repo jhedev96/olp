@@ -202,6 +202,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
       },
       readCronLines: () => cronBackend.readLines(),
       writeCronLines: (lines) => cronBackend.writeLines(lines),
+      revokeSessions: () => auth.store.revokeAll(),
     },
   });
   startBackupScheduler({

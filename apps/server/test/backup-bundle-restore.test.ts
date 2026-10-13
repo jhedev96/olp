@@ -8,7 +8,9 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
+import { readBundleManifest } from '../src/backup.js';
 import type { BackupSystem, BundleJob } from '../src/backup.js';
+import { hashPassword } from '@olp/auth';
 import type { DbConfig, DbConn, DbDriver, DbEngine } from '../src/database.js';
 
 const KNOWN_PASSWORD = 'bundlepass1';
@@ -28,6 +30,7 @@ const fakeEnv: Environment = {
 function bundleSys(opts: { failOn?: string; unzipBad?: boolean } = {}): BackupSystem & {
   files: Map<string, string>;
   commands: Array<{ cmd: string; cwd?: string }>;
+  zips: Map<string, Map<string, string>>;
 } {
   const files = new Map<string, string>();
   const commands: Array<{ cmd: string; cwd?: string }> = [];
@@ -37,6 +40,7 @@ function bundleSys(opts: { failOn?: string; unzipBad?: boolean } = {}): BackupSy
   return {
     files,
     commands,
+    zips,
     exec: (cmd, _timeoutMs, execOpts = {}) => {
       commands.push({ cmd, cwd: execOpts.cwd });
       if (opts.failOn !== undefined && cmd.includes(opts.failOn)) return Promise.reject(new Error('disk gone'));
@@ -355,8 +359,7 @@ describe('server bundle restore', () => {
       expect(cron.written).toEqual([]);
   });
 
-  it('fails missing part files but still finishes', async () => {
-    const { dataDir, legacyDir, root } = freshWorkspace();
+  it('fails missing part files but still finishes', async () => {    const { dataDir, legacyDir, root } = freshWorkspace();
     const sys = bundleSys();
     const cron = stubCron([]);
     sys.files.set(join(dataDir, 'sites.json'), JSON.stringify({ sites: [] }));
@@ -383,5 +386,147 @@ describe('server bundle restore', () => {
       expect(job.state).toBe('failed');
       expect(job.steps[0]).toMatchObject({ status: 'failed', detail: 'Archive file is missing' });
       expect(job.steps.slice(1).map((s) => s.status)).toEqual(['ok', 'ok']);
+      expect(job.steps.some((s) => s.key === 'restore-auth')).toBe(false);
+  });
+});
+
+describe('server bundle restore-auth', () => {
+  const SALT = 's'.repeat(32);
+  const authBytes = (pw: string): string =>
+    JSON.stringify({ username: 'tester', salt: SALT, hash: hashPassword(pw, SALT), passkeys: [] });
+
+  it('reads pre-038 manifests without hasAuth', async () => {
+    const sys = bundleSys();
+    sys.files.set(join('/d/backups', 'old.bundle.json'), JSON.stringify({ id: 'old', created: 1, parts: [] }));
+    expect(readBundleManifest(sys, '/d', 'old')).toEqual({ id: 'old', created: 1, parts: [] });
+    sys.files.set(join('/d/backups', 'bad.bundle.json'), JSON.stringify({ id: 'bad', created: 1, parts: [], hasAuth: 'yes' }));
+    expect(readBundleManifest(sys, '/d', 'bad')).toBeNull();
+  });
+
+  it('restores credentials last with rollback and logout', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = bundleSys();
+    const cron = stubCron([]);
+    const bytesA = authBytes('livepass-aaa111');
+    sys.files.set(join(dataDir, 'sites.json'), JSON.stringify({ sites: [] }));
+    sys.files.set(join(dataDir, 'config.json'), bytesA);
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      backupSys: sys,
+      dbDrivers: stubDrivers({ mysql: [], postgres: [] }),
+      cronBackend: cron.backend,
+    });
+    const cookie = await authedCookie(app);
+    const snapId = ((await app.inject({ method: 'POST', url: '/api/bundles', headers: { cookie }, payload: {} })).json() as { id: string }).id;
+    await waitSnapshot(app, cookie, snapId);
+    const listed = (await app.inject({ method: 'GET', url: `/api/bundles/${snapId}`, headers: { cookie } })).json() as {
+      bundle: { hasAuth?: boolean };
+    };
+    expect(listed.bundle.hasAuth).toBe(true);
+
+    // Drift live credentials out of band, then restore with the drifted password.
+    const bytesB = authBytes('otherpass-bbb222');
+    sys.files.set(join(dataDir, 'config.json'), bytesB);
+    const started = await app.inject({
+      method: 'POST',
+      url: `/api/bundles/${snapId}/restore`,
+      headers: { cookie },
+      payload: { currentPassword: 'otherpass-bbb222' },
+    });
+    expect(started.statusCode).toBe(200);
+    const rid = (started.json() as { id: string }).id;
+    // Poll until the expected logout (revoke kills the session at the end).
+    let job: BundleJob | null = null;
+    for (let i = 0; i < 200; i++) {
+      const res = await app.inject({ method: 'GET', url: `/api/bundles/restores/${rid}`, headers: { cookie } });
+      if (res.statusCode === 401) break;
+      const state = (res.json() as { job: BundleJob }).job;
+      if (state.state === 'done' || state.state === 'failed') {
+        job = state;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // The operator session is dead either way (revoke ran before finish).
+    expect((await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } })).statusCode).toBe(401);
+    expect(sys.files.get(join(dataDir, 'config.json'))).toBe(bytesA);
+    const rollbacks = [...sys.files.keys()].filter((k) => k.includes('config.json.pre-restore-'));
+    expect(rollbacks).toHaveLength(1);
+    expect(sys.files.get(rollbacks[0] as string)).toBe(bytesB);
+    if (job !== null) {
+      expect(job.state).toBe('done');
+      expect(job.steps.at(-1)).toMatchObject({ key: 'restore-auth', status: 'ok' });
+    }
+  });
+
+  it('fails closed on wrong or missing passwords with zero writes', async () => {
+    for (const payload of [{ currentPassword: 'wrong-pw' }, {}]) {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+      const sys = bundleSys();
+      const cron = stubCron([]);
+      const bytesA = authBytes('livepass-aaa111');
+      sys.files.set(join(dataDir, 'sites.json'), JSON.stringify({ sites: [] }));
+      sys.files.set(join(dataDir, 'config.json'), bytesA);
+      const { app } = buildServer({
+        dataDir,
+        legacyDir,
+        env: fakeEnv,
+        sysDeps: quietDeps(),
+        root,
+        backupSys: sys,
+        dbDrivers: stubDrivers({ mysql: [], postgres: [] }),
+        cronBackend: cron.backend,
+      });
+      const cookie = await authedCookie(app);
+      const snapId = ((await app.inject({ method: 'POST', url: '/api/bundles', headers: { cookie }, payload: {} })).json() as { id: string }).id;
+      await waitSnapshot(app, cookie, snapId);
+      const rid = (
+        (await app.inject({ method: 'POST', url: `/api/bundles/${snapId}/restore`, headers: { cookie }, payload })).json() as { id: string }
+      ).id;
+      const job = await waitRestore(app, cookie, rid);
+      expect(job.state).toBe('failed');
+      expect(job.steps.find((s) => s.key === 'restore-auth')?.detail).toMatch(/Current password/);
+      expect(sys.files.get(join(dataDir, 'config.json'))).toBe(bytesA);
+      expect([...sys.files.keys()].some((k) => k.includes('pre-restore'))).toBe(false);
+      expect((await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } })).statusCode).toBe(200);
+    }
+  });
+
+  it('blocks corrupt bundled auth without touching live bytes', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const sys = bundleSys();
+    const cron = stubCron([]);
+    const bytesA = authBytes('livepass-aaa111');
+    sys.files.set(join(dataDir, 'sites.json'), JSON.stringify({ sites: [] }));
+    sys.files.set(join(dataDir, 'config.json'), bytesA);
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      backupSys: sys,
+      dbDrivers: stubDrivers({ mysql: [], postgres: [] }),
+      cronBackend: cron.backend,
+    });
+    const cookie = await authedCookie(app);
+    const snapId = ((await app.inject({ method: 'POST', url: '/api/bundles', headers: { cookie }, payload: {} })).json() as { id: string }).id;
+    await waitSnapshot(app, cookie, snapId);
+    for (const staged of sys.zips.values()) {
+      if (staged.has('auth.json')) staged.set('auth.json', 'GARBAGE{{{');
+    }
+    const rid = (
+      (await app.inject({ method: 'POST', url: `/api/bundles/${snapId}/restore`, headers: { cookie }, payload: { currentPassword: 'livepass-aaa111' } }))
+        .json() as { id: string }
+    ).id;
+    const job = await waitRestore(app, cookie, rid);
+    expect(job.state).toBe('failed');
+    expect(job.steps.find((s) => s.key === 'restore-auth')).toMatchObject({ status: 'failed', detail: 'Invalid auth in bundle' });
+    expect(sys.files.get(join(dataDir, 'config.json'))).toBe(bytesA);
+    expect((await app.inject({ method: 'GET', url: '/api/backups', headers: { cookie } })).statusCode).toBe(200);
   });
 });
