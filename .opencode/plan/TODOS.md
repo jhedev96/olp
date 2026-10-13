@@ -226,3 +226,13 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [ ] W15-03 smoke extension (written; live run deferred)
 - [ ] W15-04 frontend purge button + tests
 - [ ] W15-05 docs + CAND-036 close-pending-live
+
+## Phase 26 — Full-system bundle wave 16 (manifest + jobs; spec approved 2026-10-13)
+
+- [~] W16-00 planning: spec + tasks + todos (`SPECS/spec-bundle-wave.md`, `TASKS/phase-26-bundle-wave.md`)
+- [ ] W16-01 discovery surfaces + tests
+- [ ] W16-02 snapshot job + tests
+- [ ] W16-03 restore-all + tests
+- [ ] W16-04 smoke extension + live ALL GREEN
+- [ ] W16-05 frontend wiring
+- [ ] W16-06 docs + CAND-035 close + CAND-038 open
