@@ -47,6 +47,10 @@ export interface BindState {
   host: string;
   port: number;
   loopback: boolean;
+  source: 'env' | 'file' | 'default';
+  effectiveHost: string;
+  effectivePort: number;
+  fallback: boolean;
 }
 
 /** Settings page inputs (tests inject navigation + timers). */
@@ -60,12 +64,13 @@ export interface SettingsPageDeps {
  * change-username, change-password (client confirm check, field clear,
  * delayed login redirect), telegram form + save + test button,
  * config export/copy, dialog-gated logout-all. Saved actions toast.
- * Server config is real (wave 9, CAND-031 core): telegram verified
- * badge (stored-token proxy), read-only bind card with loopback
- * badge, per-row session expiry. The mockup's PBKDF2 310k text and
- * rehash-on-boot flag are dropped — the flag has no cryptographic
- * effect and 310k contradicts the real 120k in `packages/auth`
- * (spec-server-config-wave §10). Editable bind → CAND-037.
+ * Server config is real (wave 9 + 13, CAND-031 core + CAND-037):
+ * telegram verified badge (stored-token proxy), editable bind with
+ * restart flow (env precedence, localhost fallback, supervisor-aware
+ * restart with login redirect), per-row session expiry. The mockup's
+ * PBKDF2 310k text and rehash-on-boot flag are dropped — the flag has
+ * no cryptographic effect and 310k contradicts the real 120k in
+ * `packages/auth` (spec-server-config-wave §10).
  */
 export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const goto =
@@ -92,6 +97,14 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
   const [confirmOthers, setConfirmOthers] = useState(false);
   const [botName, setBotName] = useState<string | null | undefined>(undefined);
   const [bind, setBind] = useState<BindState | null>(null);
+  const [bindHost, setBindHost] = useState('');
+  const [bindPort, setBindPort] = useState('');
+  const [bindMsg, setBindMsg] = useState('');
+  const [restartRequired, setRestartRequired] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartSupervisor, setRestartSupervisor] = useState('');
+  const [restartTimedOut, setRestartTimedOut] = useState(false);
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [keyName, setKeyName] = useState('');
   const [keyMessage, setKeyMessage] = useState('');
@@ -110,7 +123,11 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
       }>('/api/settings');
       setUsername(body.username);
       setVersion(body.version);
-      if (body.bind !== undefined && typeof body.bind === 'object' && body.bind !== null) setBind(body.bind);
+      if (body.bind !== undefined && typeof body.bind === 'object' && body.bind !== null) {
+        setBind(body.bind);
+        setBindHost(body.bind.host);
+        setBindPort(String(body.bind.port));
+      }
       const telegram = body.telegram;
       setTg({
         botToken: telegram.botToken,
@@ -190,6 +207,59 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
     setPendingDeleteKey(null);
     await apiJson(`/api/auth/passkeys/${target.id}`, { method: 'DELETE' }).catch(() => undefined);
     await loadKeys();
+  };
+
+  const saveBind = async (): Promise<void> => {
+    setBindMsg('');
+    setRestartRequired(false);
+    try {
+      const body = await apiJson<{ ok?: unknown; restartRequired?: unknown; error?: string }>('/api/settings/bind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: bindHost.trim(), port: Number(bindPort) }),
+      });
+      if (body.ok === true) {
+        setRestartRequired(body.restartRequired === true);
+        await load();
+      } else setBindMsg(typeof body.error === 'string' ? body.error : 'Failed');
+    } catch (err) {
+      setBindMsg(err instanceof ApiError ? err.message : 'Failed');
+    }
+  };
+
+  const confirmRestartAction = async (): Promise<void> => {
+    setConfirmRestart(false);
+    if (restarting) return;
+    setRestarting(true);
+    setRestartTimedOut(false);
+    setBindMsg('');
+    try {
+      const body = await apiJson<{ ok?: unknown; supervisor?: unknown }>('/api/server/restart', { method: 'POST' });
+      if (body.ok !== true) {
+        setBindMsg('Restart failed');
+        setRestarting(false);
+        return;
+      }
+      setRestartSupervisor(typeof body.supervisor === 'string' ? body.supervisor : 'unknown');
+    } catch (err) {
+      setBindMsg(err instanceof ApiError ? err.message : 'Restart failed');
+      setRestarting(false);
+      return;
+    }
+    // Sessions die with the process (in-memory, by design): once the
+    // socket answers again, land on login instead of a dead table.
+    for (let i = 0; i < 15; i++) {
+      await new Promise<void>((resolve) => later(() => resolve(), 2000));
+      try {
+        await apiJson<{ ok?: unknown }>('/api/health');
+        goto('/login');
+        return;
+      } catch {
+        // still down — keep polling
+      }
+    }
+    setRestarting(false);
+    setRestartTimedOut(true);
   };
 
   const loadSessions = useCallback(async (): Promise<void> => {
@@ -538,13 +608,64 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
           {bind === null ? (
             <p className="text-sm text-neutral-400">Loading…</p>
           ) : (
-            <p className="font-mono text-sm text-neutral-300">
-              {bind.host}:{bind.port}
-            </p>
+            <>
+              <p className="font-mono text-sm text-neutral-300">
+                {bind.effectiveHost}:{bind.effectivePort}
+                <span className="ml-2 text-xs text-neutral-500">listening now ({bind.source})</span>
+              </p>
+              {(bind.fallback || bind.effectiveHost !== bind.host || bind.effectivePort !== bind.port) && (
+                <p role="alert" className="mt-1 text-xs text-yellow-400">
+                  Configured {bind.host}:{bind.port} did not apply{bind.fallback ? ' — fell back to localhost' : ''}. Fix it
+                  below, then restart.
+                </p>
+              )}
+              {bindMsg !== '' && (
+                <p role="alert" className="mt-1 text-xs text-red-400">
+                  {bindMsg}
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Input
+                  placeholder="Host"
+                  aria-label="Bind host"
+                  value={bindHost}
+                  onChange={(ev) => setBindHost(ev.target.value)}
+                  disabled={bind.source === 'env' || restarting}
+                  className="w-44 font-mono"
+                />
+                <Input
+                  placeholder="Port"
+                  aria-label="Bind port"
+                  value={bindPort}
+                  onChange={(ev) => setBindPort(ev.target.value)}
+                  disabled={bind.source === 'env' || restarting}
+                  className="w-28 font-mono"
+                />
+                <Button size="sm" onClick={() => void saveBind()} disabled={bind.source === 'env' || restarting}>
+                  Save bind
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmRestart(true)} disabled={restarting}>
+                  {restarting ? 'Restarting…' : 'Restart panel'}
+                </Button>
+              </div>
+              {bind.source === 'env' ? (
+                <p className="mt-1 text-xs text-neutral-500">
+                  Managed by PANEL_HOST/PANEL_PORT env — unset them to use the file.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-neutral-500">Saved to the settings file. Needs a restart to apply.</p>
+              )}
+              {restartRequired && (
+                <p className="mt-1 text-xs text-yellow-400">Restart required for the new bind to apply.</p>
+              )}
+              {restartTimedOut && (
+                <p className="mt-1 text-xs text-yellow-400">
+                  Still down after 30s — restart it manually{restartSupervisor === 'pm2' ? ' (pm2 should have revived it)' : ''}:
+                  see Daemon reload below.
+                </p>
+              )}
+            </>
           )}
-          <p className="mt-1 text-xs text-neutral-500">
-            Read-only (editing needs a restart-capable config — CAND-037). Apply out-of-band edits via the daemon reload below.
-          </p>
         </Card>
         <Card>
           <h2 className="font-bold">Daemon reload</h2>
@@ -592,6 +713,15 @@ export function SettingsPage(deps: SettingsPageDeps = {}): ReactElement {
         destructive={true}
         onConfirm={() => void confirmDeleteKeyAction()}
         onCancel={() => setPendingDeleteKey(null)}
+      />
+      <ConfirmDialog
+        open={confirmRestart}
+        title="Restart panel"
+        message="Restart the panel now? All sessions end (you will log in again), and without a supervisor (pm2/systemd) it stays down until started manually."
+        confirmLabel="Restart"
+        destructive={true}
+        onConfirm={() => void confirmRestartAction()}
+        onCancel={() => setConfirmRestart(false)}
       />
     </main>
   );
