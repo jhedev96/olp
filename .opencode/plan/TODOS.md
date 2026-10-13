@@ -251,9 +251,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 28 — Editor side-panel parity wave 18 (layout only; spec approved 2026-10-13)
 
-- [~] W18-00 planning: spec + tasks + todos (`SPECS/spec-editor-sidepanel-wave.md`, `TASKS/phase-28-sidepanel-wave.md`)
-- [ ] W18-01 side-panel layout + tests
-- [ ] W18-02 docs + CAND-040 close
+- [x] W18-00 planning: spec + tasks + todos (`SPECS/spec-editor-sidepanel-wave.md`, `TASKS/phase-28-sidepanel-wave.md`)
+- [x] W18-01 side-panel layout + tests
+- [x] W18-02 docs + CAND-040 close
 
 ## Phase 29 — Ops dummies sweep wave 19 (013/016/019; spec approved 2026-10-13)
 
