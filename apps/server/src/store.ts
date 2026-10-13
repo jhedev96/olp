@@ -1,10 +1,25 @@
 import { spawn } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { EnvId, PkgManId } from '@olp/env-core';
-import { CATALOG, checkCommand, installCommand, itemById, updateCommand, upgradeCommand, versionCommand } from '@olp/pkgman';
+import {
+  CATALOG,
+  checkCommand,
+  installCommand,
+  itemById,
+  mirrorSource,
+  parseApkMirror,
+  parseAptMirror,
+  parseBrewRemote,
+  parsePacmanMirror,
+  parseYumMirror,
+  purgeCommand,
+  updateCommand,
+  upgradeCommand,
+  versionCommand,
+} from '@olp/pkgman';
 import { defaultExec } from './exec.js';
 
 /** Live install state (log ring capped, Terwo parity). */
@@ -25,9 +40,6 @@ const VERSION_LINE_MAX = 120;
 
 /** Mirror latency timeout (slow DNS answers as null, never hangs). */
 const DNS_TIMEOUT_MS = 3000;
-
-/** Hostnames parsed from sources files must match this before lookup. */
-const HOST_RE = /^[a-z0-9.-]+$/i;
 
 /** Shell launcher (tests inject fakes; production spawns `bash -c`). */
 export type SpawnShell = (
@@ -78,6 +90,8 @@ export interface StoreOptions {
   spawnShell?: SpawnShell;
   /** Sources-list reader (null on missing/unreadable). Defaults to fs. */
   readSourceFile?: (path: string) => string | null;
+  /** Sources-dir lister (empty on missing/unreadable). Defaults to fs. */
+  listSourceDir?: (dir: string) => string[];
   /** Host resolver for latency (rejects on failure). Defaults to `node:dns`. */
   dnsLookup?: (host: string) => Promise<unknown>;
   /** Finish notifier (telegram hook; absent until the telegram spec lands). */
@@ -85,32 +99,30 @@ export interface StoreOptions {
 }
 
 /**
- * First mirror host parsed from an APT sources list (`deb` lines only).
- * Untrusted file content: only plausible hostnames are returned (must
- * contain a dot or colon, so degenerate tokens like `https://exa`
- * from a space-broken line never become a displayed mirror).
+ * First mirror host parsed from an APT sources list (`deb` lines and
+ * DEB822 `URIs:`). Untrusted file content: only plausible hostnames
+ * are returned (must contain a dot or colon, so degenerate tokens
+ * like `https://exa` from a space-broken line never become a
+ * displayed mirror). Thin wrapper over the pkgman parser (kept for
+ * the Termux-first history; new code calls `parseAptMirror` via the
+ * per-env path below).
  */
 export function parseMirrorHost(sources: string): string | null {
-  for (const line of sources.split('\n')) {
-    const url = line.trim().match(/^deb\s+(\S+)/)?.[1];
-    if (url === undefined) continue;
-    try {
-      const host = new URL(url).hostname;
-      if (host !== '' && HOST_RE.test(host) && (host.includes('.') || host.includes(':'))) return host;
-    } catch {
-      continue;
-    }
-  }
-  return null;
+  return parseAptMirror(sources);
+}
+
+/** Brew repo paths must pass this before joining (untrusted exec output). */
+function safeRepoPath(path: string): boolean {
+  return path !== '' && path.startsWith('/') && !path.includes('..') && !path.includes('\n') && !path.includes("'") && !path.includes('"');
 }
 
 /**
  * Register Store endpoints (all behind the session gate).
  * Unknown ids and busy runs answer 400; never-run logs answer the
  * empty shape (Terwo parity, no 404s here). Explicit `/update`,
- * `/upgrade`, `/versions`, and `/mirror` routes are registered before
- * the parametric `:id` routes so manager ops never collide with
- * package ids (plus a test proving it).
+ * `/upgrade`, `/purge`, `/versions`, and `/mirror` routes are
+ * registered before the parametric `:id` routes so manager ops never
+ * collide with package ids (plus a test proving it).
  */
 export function registerStoreRoutes(app: FastifyInstance, opts: StoreOptions): void {
   const check = opts.check ?? ((cmd) => defaultExec(cmd, PROBE_TIMEOUT_MS).then(
@@ -124,6 +136,13 @@ export function registerStoreRoutes(app: FastifyInstance, opts: StoreOptions): v
       return readFileSync(path, 'utf8');
     } catch {
       return null;
+    }
+  });
+  const listSourceDir = opts.listSourceDir ?? ((dir) => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
     }
   });
   const dnsLookup = opts.dnsLookup ?? ((host) => lookup(host));
@@ -204,12 +223,66 @@ export function registerStoreRoutes(app: FastifyInstance, opts: StoreOptions): v
 
   app.get('/api/install/upgrade/log', async () => readLog(ops, 'upgrade'));
 
+  app.post('/api/install/purge/start', async () => {
+    if (ops.get('purge')?.running === true) throw new Error('Cache purge already running');
+    const resolved = purgeCommand(opts.env);
+    if (!resolved.ok) throw new Error(resolved.reason);
+    launch(ops, 'purge', 'Cache purge', resolved.cmd);
+    return { ok: true };
+  });
+
+  app.get('/api/install/purge/log', async () => readLog(ops, 'purge'));
+
+  /** Brew origin host via the repo gitconfig (any failure → null). */
+  const brewMirror = async (): Promise<string | null> => {
+    try {
+      const repo = (await exec('brew --repository')).split('\n')[0]?.trim() ?? '';
+      if (!safeRepoPath(repo)) return null;
+      const raw = readSourceFile(join(repo, '.git/config'));
+      return raw === null ? null : parseBrewRemote(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  /** First mirror host across the env's candidate files (first hit wins). */
+  const fileMirror = (): string | null => {
+    const source = mirrorSource(opts.env);
+    if (source === null || source.kind === 'brew') return null;
+    const prefix = opts.prefix ?? process.env['PREFIX'] ?? '';
+    if (source.underPrefix === true && prefix === '') return null;
+    const candidates: string[] = [];
+    if (source.file !== undefined) {
+      candidates.push(source.underPrefix === true ? join(prefix, source.file) : source.file);
+    }
+    if (source.dir !== undefined) {
+      const dir = source.underPrefix === true ? join(prefix, source.dir) : source.dir;
+      for (const entry of listSourceDir(dir).filter((f) => source.exts === undefined || source.exts.some((ext) => f.endsWith(ext))).sort()) {
+        candidates.push(join(dir, entry));
+      }
+    }
+    const parse =
+      source.kind === 'apt'
+        ? parseAptMirror
+        : source.kind === 'pacman'
+          ? parsePacmanMirror
+          : source.kind === 'apk'
+            ? parseApkMirror
+            : parseYumMirror;
+    for (const path of candidates) {
+      const raw = readSourceFile(path);
+      if (raw === null) continue;
+      const host = parse(raw);
+      if (host !== null) return host;
+    }
+    return null;
+  };
+
   app.get('/api/install/mirror', async () => {
     const manager = opts.manager === 'none' ? null : opts.manager;
-    if (opts.env !== 'termux' || manager === null) return { manager, mirror: null, latencyMs: null };
-    const prefix = opts.prefix ?? process.env['PREFIX'] ?? '';
-    const raw = prefix === '' ? null : readSourceFile(join(prefix, 'etc/apt/sources.list'));
-    const mirror = raw === null ? null : parseMirrorHost(raw);
+    const source = mirrorSource(opts.env);
+    if (manager === null || source === null) return { manager, mirror: null, latencyMs: null };
+    const mirror = source.kind === 'brew' ? await brewMirror() : fileMirror();
     if (mirror === null) return { manager, mirror: null, latencyMs: null };
     const started = Date.now();
     const reachable = await Promise.race([

@@ -43,7 +43,7 @@
 | CAND-034 | ~~Terminal snippet/macro runners (desktop macros row + mobile one-touch runners)~~ | Shipped wave 11: macros row + customs + destructive confirm (CLOSED 2026-10-12) | Local-only storage; guard is UX, not a boundary |
 | CAND-035 | ~~Backup full-system bundle (databases + crons + configs)~~ | Wave 16 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — manifest + snapshot/restore jobs + smoke + page wired; unit/integration green, behavioral proof is a HUMAN GATE | Split from CAND-029 in wave 6; auth inclusion splits to CAND-038 |
 | CAND-038 | Bundle auth-config inclusion (careful planning) | NEW wave 16: `config.json` restore risks lockout; needs its own design | Split from CAND-035 in wave 16 (human-locked) |
-| CAND-036 | Store per-env mirror detection + purge-cache | NEW: manager source parsing per OS (apt sources, pacman mirrorlist, apk repos, dnf, brew taps) + cache-clean op with confirm design | Split from CAND-027 in wave 7 (wave 7 ships Termux-honest + nulls) |
+| CAND-036 | ~~Store per-env mirror detection + purge-cache~~ | Wave 15 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — unit/integration green, behavioral proof is a HUMAN GATE | Brew attempt null-safe; metalink hosts honestly excluded |
 | CAND-037 | ~~Editable bind with restart flow~~ | Shipped wave 13: file bind + validation + restart + fallback (CLOSED 2026-10-13) | systemd/PM2 generation stays out (installers own it) |
 
 Rules: add rows only from inventory verdicts (no drive-by ideas without

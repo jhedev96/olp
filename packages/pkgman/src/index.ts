@@ -5,3 +5,13 @@
 
 export type { CatalogItem } from './catalog.js';
 export { CATALOG, checkCommand, installCommand, isForced, itemById, updateCommand, upgradeCommand, versionCommand } from './catalog.js';
+export {
+  mirrorSource,
+  parseApkMirror,
+  parseAptMirror,
+  parseBrewRemote,
+  parsePacmanMirror,
+  parseYumMirror,
+  purgeCommand,
+} from './mirrors.js';
+export type { MirrorSource } from './mirrors.js';

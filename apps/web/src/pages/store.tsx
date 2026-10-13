@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtSize } from '../lib/format.js';
 import { navigateTo } from '../lib/router.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { EmptyState } from '../components/common/States.js';
 import { Badge } from '../components/common/Badge.js';
 import { Button } from '../components/ui/button.js';
@@ -27,10 +28,14 @@ export interface MirrorInfo {
 }
 
 /** Manager-op run slots (log modal reuse). */
-export type OpKind = 'update' | 'upgrade';
+export type OpKind = 'update' | 'upgrade' | 'purge';
 
-const OP_LABEL: Record<OpKind, string> = { update: 'Repo update', upgrade: 'Batch upgrade' };
-const OP_LOG: Record<OpKind, string> = { update: '/api/install/update/log', upgrade: '/api/install/upgrade/log' };
+const OP_LABEL: Record<OpKind, string> = { update: 'Repo update', upgrade: 'Batch upgrade', purge: 'Cache purge' };
+const OP_LOG: Record<OpKind, string> = {
+  update: '/api/install/update/log',
+  upgrade: '/api/install/upgrade/log',
+  purge: '/api/install/purge/log',
+};
 
 /** Log poll cadence while running (Terwo 1 s parity). */
 export const INSTALL_POLL_MS = 1000;
@@ -65,12 +70,13 @@ type SortMode = 'installed' | 'name';
  * live log modal, mirror/latency card, storage bar, Installed Only
  * filter, ⌘K shortcut. Per-card service actions stay out (owned by
  * the services/database waves); per-env mirror detection → CAND-036;
- * purge-cache → future confirm design.
+ * purge-cache ships as a confirm-guarded third ops slot (wave 15).
  */
 export function StorePage(): ReactElement {
   const [items, setItems] = useState<StoreItem[]>([]);
   const [error, setError] = useState('');
   const [logView, setLogView] = useState<LogView | null>(null);
+  const [confirmPurge, setConfirmPurge] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [sortMode, setSortMode] = useState<SortMode>('installed');
@@ -237,6 +243,9 @@ export function StorePage(): ReactElement {
         <Button size="sm" variant="outline" onClick={() => void startOp('upgrade')}>
           Batch upgrade
         </Button>
+        <Button size="sm" variant="outline" onClick={() => setConfirmPurge(true)}>
+          Purge cache
+        </Button>
       </div>
       {error !== '' && (
         <p role="alert" className="mb-3 text-sm text-red-400">
@@ -344,6 +353,18 @@ export function StorePage(): ReactElement {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmPurge}
+        title="Purge package cache"
+        message="Remove downloaded package archives? Installed software stays. Frees disk immediately."
+        confirmLabel="Purge"
+        destructive={true}
+        onConfirm={() => {
+          setConfirmPurge(false);
+          void startOp('purge');
+        }}
+        onCancel={() => setConfirmPurge(false)}
+      />
     </main>
   );
 }

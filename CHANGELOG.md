@@ -80,6 +80,12 @@ Termux/Alpine/macOS hardware.
   pid/version/stats list fields + cards + dashboard RAM sum +
   restart wiring. Unit/integration green; behavioral proof is a
   HUMAN GATE (TODOS phase 24).
+- Per-env mirror + purge wave 15 [UNTESTED live — merged 2026-10-13
+  on human decision, box inadequate for live servers]: native mirror
+  files per OS (apt incl. DEB822, pacman, apk, yum baseurl-only,
+  brew remote attempt) + purge-cache ops slot with confirm dialog;
+  page wired. Unit/integration green; behavioral proof is a HUMAN
+  GATE (TODOS phase 25).
 - Full-system bundle wave 16 [UNTESTED live — merged 2026-10-13 on
   human decision, box inadequate for live servers]: manifest + parts
   snapshot job (enumerate/dump/stage/manifest, single-flight) +

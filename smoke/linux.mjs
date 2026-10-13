@@ -192,7 +192,30 @@ for (let i = 0; i < 6; i++) {
 }
 check('store update completed', updDone);
 const mirror = json('GET', '/api/install/mirror');
-check('store mirror shape', mirror.manager === 'apt' && mirror.mirror === null && mirror.latencyMs === null);
+check(
+  'store mirror shape',
+  mirror.manager === 'apt' &&
+    (mirror.mirror === null || typeof mirror.mirror === 'string') &&
+    (mirror.latencyMs === null || typeof mirror.latencyMs === 'number'),
+);
+
+// cache purge wave 15 (apt-get clean is fast + harmless; full-suite
+// live run deferred with the wave-14 gate — box OOM today)
+check('store purge log empty', (() => {
+  const l = json('GET', '/api/install/purge/log');
+  return l.logs === '' && l.running === false && l.exitCode === null;
+})());
+check('store purge started', json('POST', '/api/install/purge/start', {}).ok === true);
+let purgeDone = false;
+for (let i = 0; i < 6; i++) {
+  execSync('sleep 5');
+  const l = json('GET', '/api/install/purge/log');
+  if (!l.running) {
+    purgeDone = l.exitCode !== null;
+    break;
+  }
+}
+check('store purge completed', purgeDone);
 check('proxy list empty', Array.isArray(json('GET', '/api/nginx/proxies').proxies));
 check('cron stopped here', json('GET', '/api/cron/status').running === false);
 

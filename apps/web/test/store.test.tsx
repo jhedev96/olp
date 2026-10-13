@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { StorePage } from '../src/pages/store.js';
 
 afterEach(() => {
@@ -88,6 +88,37 @@ describe('web store page', () => {
       });
       expect(screen.getByText(/Done/)).not.toBeNull();
       expect(screen.getByText(/done \(exit 0\)/)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('confirms cache purge before running it in the modal', async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      stubApi((url) => {
+        calls.push(url);
+        if (url === '/api/install/purge/start') return { status: 200, json: { ok: true } };
+        if (url === '/api/install/purge/log') {
+          return { status: 200, json: { logs: 'Cleaned\n', running: false, exitCode: 0 } };
+        }
+        return fullHandler(url);
+      });
+      await act(async () => {
+        render(<StorePage />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Purge cache'));
+      });
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.textContent).toContain('Installed software stays');
+      expect(calls.some((c) => c === '/api/install/purge/start')).toBe(false);
+      await act(async () => {
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Purge' }));
+      });
+      expect(screen.getByText('Cache purge')).not.toBeNull();
+      expect(calls.some((c) => c === '/api/install/purge/start')).toBe(true);
     } finally {
       vi.useRealTimers();
     }
