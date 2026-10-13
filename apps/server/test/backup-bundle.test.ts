@@ -391,6 +391,8 @@ describe('server bundle snapshot', () => {
         discovery: {
           listDatabases: () => Promise.reject(new Error('boom')),
           readCronJobs: () => Promise.resolve(cronJobs),
+          readCronLines: () => Promise.resolve([]),
+          writeCronLines: () => Promise.resolve(),
         },
       },
       job,

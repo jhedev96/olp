@@ -5,9 +5,10 @@ import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
 import { relOf, safePath } from './files.js';
 import { nextRunMs, parseCronSchedule } from './cron-schedule.js';
+import { cronJobLine, findMissingCronJobs, parseCronExport, parseCronLine } from './cron.js';
 import type { CronJob } from './cron.js';
 import type { DbConfig, DbEngine } from './database.js';
-import { filterUserDatabases } from './database.js';
+import { filterUserDatabases, quotePgIdent, validDbName } from './database.js';
 
 /** Backup kinds: folder archives plus per-engine SQL dumps. */
 export type BackupType = 'folder' | 'mysql' | 'postgres';
@@ -104,6 +105,10 @@ export interface BundleDiscovery {
   /** Raw database names per engine (unfiltered; failures read as `[]`). */
   listDatabases: (engine: DbEngine) => Promise<string[]>;
   readCronJobs: () => Promise<CronJob[]>;
+  /** Raw crontab lines (foreign lines preserved on restore). */
+  readCronLines: () => Promise<string[]>;
+  /** Replace the whole crontab (restore re-creates missing jobs only). */
+  writeCronLines: (lines: string[]) => Promise<void>;
 }
 
 /** Inputs for {@link runBundleSnapshot} (shared by the route and tests). */
@@ -355,9 +360,171 @@ export async function runBundleSnapshot(
   }
 }
 
+/** Inputs for {@link runBundleRestore} (shared by the route and tests). */
+export interface BundleRestoreDeps {
+  sys: BackupSystem;
+  dataDir: string;
+  dbConfig: (engine: 'mysql' | 'postgres') => DbConfig;
+  now: () => number;
+  discovery: BundleDiscovery;
+}
+
+/** Reset one database so the archived dump replays onto an empty schema. */
+async function resetDatabase(sys: BackupSystem, cfg: DbConfig, engine: DbEngine, db: string): Promise<void> {
+  if (engine === 'mysql') {
+    await mustBin(sys, 'mysql', 'mysql not found. Install mysql via the Store menu.');
+    const pw = cfg.password === '' ? '' : ` --password=${quote(cfg.password)}`;
+    const ident = `\`${db.replace(/`/g, '``')}\``;
+    await sys.exec(
+      `mysql -h ${quote(cfg.host)} -P ${quote(cfg.port)} -u ${quote(cfg.user)}${pw} -e ${quote(`DROP DATABASE IF EXISTS ${ident}; CREATE DATABASE ${ident}`)}`,
+      ARCHIVE_TIMEOUT_MS,
+    );
+  } else {
+    await mustBin(sys, 'psql', 'psql not found. Install postgres via the Store menu.');
+    await sys.exec(
+      `PGPASSWORD=${quote(cfg.password)} psql -h ${quote(cfg.host)} -p ${quote(cfg.port)} -U ${quote(cfg.user)} -d postgres -c ${quote(`DROP DATABASE IF EXISTS ${quotePgIdent(db)}; CREATE DATABASE ${quotePgIdent(db)}`)}`,
+      ARCHIVE_TIMEOUT_MS,
+    );
+  }
+}
+
+/**
+ * Replay one full-system bundle: per-DB reset + pipe-in, configs
+ * unzip + shape-validate before overwrite, crons missing-only
+ * re-creation. Per-part failures are recorded and the job CONTINUES
+ * (`failed-if-any`, never silent). Never rejects.
+ */
+export async function runBundleRestore(
+  deps: BundleRestoreDeps,
+  manifest: BundleManifest,
+  job: BundleJob,
+): Promise<BundleJob> {
+  const { sys, dataDir } = deps;
+  const dir = backupsDir(dataDir);
+  let failed = false;
+  const stepFailed = (step: BundleStep, err: unknown): void => {
+    const message = err instanceof Error ? err.message : String(err);
+    step.status = 'failed';
+    step.detail = capDetail(message);
+    failed = true;
+  };
+
+  for (const part of manifest.parts) {
+    if (part.kind !== 'mysql' && part.kind !== 'postgres') continue;
+    const step: BundleStep = { key: `restore-${part.kind}-${part.name}`, label: `Restore ${part.kind} ${part.name}`, status: 'running', detail: '' };
+    job.steps.push(step);
+    try {
+      const meta = readMeta(sys, dataDir, part.name);
+      if (meta === null) throw new Error('Archive sidecar is missing');
+      if (!validDbName(meta.source)) throw new Error('Invalid database name in archive');
+      const full = join(dir, part.file);
+      if (sys.statFile(full) === null) throw new Error('Archive file is missing');
+      const cfg = deps.dbConfig(part.kind);
+      const gzipped = part.file.endsWith('.sql.gz');
+      if (gzipped) await mustBin(sys, 'gzip', 'gzip not found.');
+      await resetDatabase(sys, cfg, part.kind, meta.source);
+      if (part.kind === 'mysql') {
+        await sys.exec(
+          gzipped ? `gzip -dc ${quote(full)} | ${mysqlCommand(cfg, 'mysql', meta.source, null, '<')}` : mysqlCommand(cfg, 'mysql', meta.source, full, '<'),
+          ARCHIVE_TIMEOUT_MS,
+        );
+      } else {
+        await sys.exec(
+          gzipped ? `gzip -dc ${quote(full)} | ${pgCommand(cfg, 'psql', meta.source, null, '<')}` : pgCommand(cfg, 'psql', meta.source, full, '<'),
+          ARCHIVE_TIMEOUT_MS,
+        );
+      }
+      step.status = 'ok';
+      step.detail = meta.source;
+    } catch (err) {
+      stepFailed(step, err);
+    }
+  }
+
+  const configsPart = manifest.parts.find((part) => part.kind === 'configs');
+  if (configsPart !== undefined) {
+    const step: BundleStep = { key: 'restore-configs', label: 'Restore configs', status: 'running', detail: '' };
+    job.steps.push(step);
+    const staging = join(dir, `.staging-restore-${job.id}`);
+    try {
+      const meta = readMeta(sys, dataDir, configsPart.name);
+      if (meta === null) throw new Error('Archive sidecar is missing');
+      const full = join(dir, configsPart.file);
+      if (sys.statFile(full) === null) throw new Error('Archive file is missing');
+      await mustBin(sys, 'unzip', 'Package "unzip" is not installed — install it first via the Store menu');
+      sys.mkdirp(staging);
+      await sys.exec(`unzip -o ${quote(full)} -d ${quote(staging)}`, ARCHIVE_TIMEOUT_MS);
+      const rows: Array<{ file: string; raw: string }> = [];
+      for (const file of BUNDLE_CONFIG_FILES) {
+        const raw = sys.readFile(join(staging, file));
+        if (raw === null) continue;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          throw new Error(`Invalid config in bundle: ${file}`);
+        }
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error(`Invalid config in bundle: ${file}`);
+        }
+        rows.push({ file, raw });
+      }
+      if (rows.length === 0) {
+        step.status = 'ok';
+        step.detail = 'no config files in bundle';
+      } else {
+        for (const row of rows) sys.writeFile(join(dataDir, row.file), row.raw, { mode: 0o600 });
+        step.status = 'ok';
+        step.detail = `${rows.length} files applied`;
+      }
+    } catch (err) {
+      stepFailed(step, err);
+    } finally {
+      for (const file of BUNDLE_CONFIG_FILES) sys.removeFile(join(staging, file));
+    }
+  }
+
+  const cronsPart = manifest.parts.find((part) => part.kind === 'crons');
+  if (cronsPart !== undefined) {
+    const step: BundleStep = { key: 'restore-crons', label: 'Restore cron jobs', status: 'running', detail: '' };
+    job.steps.push(step);
+    try {
+      const data = sys.readFile(join(dir, cronsPart.file));
+      if (data === null) throw new Error('Archive file is missing');
+      let wanted: CronJob[];
+      try {
+        wanted = parseCronExport(JSON.parse(data));
+      } catch {
+        throw new Error('Invalid cron export in bundle');
+      }
+      const lines = await deps.discovery.readCronLines();
+      const existing: CronJob[] = [];
+      for (const line of lines) {
+        const found = parseCronLine(line);
+        if (found !== null) existing.push(found);
+      }
+      const missing = findMissingCronJobs(existing, wanted);
+      if (missing.length === 0) {
+        step.status = 'ok';
+        step.detail = '0 jobs missing (nothing to do)';
+      } else {
+        const fresh = missing.map((entry) => cronJobLine({ ...entry, id: randomBytes(4).toString('hex') }));
+        await deps.discovery.writeCronLines([...lines, ...fresh]);
+        step.status = 'ok';
+        step.detail = `${fresh.length} jobs re-created`;
+      }
+    } catch (err) {
+      stepFailed(step, err);
+    }
+  }
+
+  job.state = failed ? 'failed' : 'done';
+  job.finished = deps.now();
+  return job;
+}
+
 /** Coerce a snapshot selection (unknown shapes throw for the 400 handler). */
-export function parseBundleSelection(body: Record<string, unknown>): BundleSelection {
-  const out: BundleSelection = {};
+export function parseBundleSelection(body: Record<string, unknown>): BundleSelection {  const out: BundleSelection = {};
   const dbs = body['databases'];
   if (dbs !== undefined) {
     if (typeof dbs !== 'object' || dbs === null || Array.isArray(dbs)) throw new Error('Invalid databases selection');
@@ -955,5 +1122,52 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
       return { error: 'Unknown bundle' };
     }
     return { bundle, job };
+  });
+
+  const restoreJobs = new Map<string, BundleJob>();
+  let restoreRunning: string | null = null;
+
+  const pruneJobs = (jobs: Map<string, BundleJob>): void => {
+    if (jobs.size <= BUNDLE_JOBS_KEPT) return;
+    for (const [key, kept] of jobs) {
+      if (jobs.size <= BUNDLE_JOBS_KEPT) break;
+      if (kept.state !== 'running') jobs.delete(key);
+    }
+  };
+
+  app.post('/api/bundles/:id/restore', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const manifest = validBackupName(id) ? readBundleManifest(sys, opts.dataDir, id) : null;
+    if (manifest === null) {
+      reply.code(404);
+      return { error: 'Unknown bundle' };
+    }
+    const discovery = opts.bundle;
+    if (discovery === undefined) throw new Error('Bundles are not available');
+    if (restoreRunning !== null) {
+      reply.code(409);
+      return { error: 'A bundle restore is already running' };
+    }
+    const rid = `restore-${randomBytes(6).toString('hex')}`;
+    const job = createBundleJob(rid, now());
+    restoreJobs.set(rid, job);
+    pruneJobs(restoreJobs);
+    restoreRunning = rid;
+    void runBundleRestore({ sys, dataDir: opts.dataDir, dbConfig: opts.dbConfig, now, discovery }, manifest, job).finally(() => {
+      if (restoreRunning === rid) restoreRunning = null;
+    });
+    return { ok: true, id: rid };
+  });
+
+  app.get('/api/bundles/restores/:id', async (req, reply) => {
+    const params = (req.params ?? {}) as Record<string, unknown>;
+    const id = typeof params['id'] === 'string' ? params['id'] : '';
+    const job = restoreJobs.get(id) ?? null;
+    if (job === null) {
+      reply.code(404);
+      return { error: 'Unknown restore' };
+    }
+    return { job };
   });
 }

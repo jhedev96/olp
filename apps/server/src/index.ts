@@ -199,6 +199,8 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
         }
         return jobs;
       },
+      readCronLines: () => cronBackend.readLines(),
+      writeCronLines: (lines) => cronBackend.writeLines(lines),
     },
   });
   startBackupScheduler({
