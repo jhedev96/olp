@@ -219,9 +219,9 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 25 — Per-env mirror + purge wave 15 (deferred live; spec approved 2026-10-13)
 
-- [~] W15-00 planning: spec + tasks + todos (`SPECS/spec-mirror-wave.md`, `TASKS/phase-25-mirror-wave.md`)
-- [ ] W15-01 pkgman descriptors + parsers + purge map + tests
-- [ ] W15-02 server per-env mirror + purge slot + tests
-- [ ] W15-03 smoke extension (written; live run deferred)
-- [ ] W15-04 frontend purge button + tests
-- [ ] W15-05 docs + CAND-036 close-pending-live
+- [x] W15-00 planning: spec + tasks + todos (`SPECS/spec-mirror-wave.md`, `TASKS/phase-25-mirror-wave.md`)
+- [x] W15-01 pkgman descriptors + parsers + purge map + tests
+- [x] W15-02 server per-env mirror + purge slot + tests
+- [x] W15-03 smoke extension (written; live run deferred)
+- [x] W15-04 frontend purge button + tests
+- [x] W15-05 docs + CAND-036 close-pending-live
