@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { DashboardPage } from '../src/pages/dashboard.js';
 
 afterEach(() => {
@@ -21,8 +21,8 @@ const STATS = {
 
 const SITES = {
   sites: [
-    { name: 'web', type: 'node', path: 'server.js', port: 3000, running: true },
-    { name: 'blog', type: 'php', path: 'blog', port: 4000, running: false },
+    { name: 'web', type: 'node', path: 'server.js', port: 3000, running: true, memBytes: 1000 },
+    { name: 'blog', type: 'php', path: 'blog', port: 4000, running: false, memBytes: null },
   ],
 };
 
@@ -86,8 +86,7 @@ describe('web dashboard page', () => {
     expect(screen.getByText('unavailable')).not.toBeNull();
   });
 
-  it('polls every 5 s and cleans up on unmount', async () => {
-    vi.useFakeTimers();
+  it('polls every 5 s and cleans up on unmount', async () => {    vi.useFakeTimers();
     try {
       const { calls } = stubApi((url) => (url === '/api/stats' ? STATS : SITES));
       let unmount = (): void => {};
@@ -134,7 +133,7 @@ describe('web dashboard page', () => {
     expect(screen.getByText('Installed')).not.toBeNull();
     expect(screen.getByText('CAND-013')).not.toBeNull();
     expect(screen.queryByText('CAND-005')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Restart panel' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Restart panel' })).toHaveProperty('disabled', false);
   });
 
   it('starts stopped daemons and surfaces errors', async () => {
@@ -174,5 +173,67 @@ describe('web dashboard page', () => {
       fireEvent.click(screen.getByText('Configure Reverse Proxy →'));
     });
     expect(window.location.pathname).toBe('/website');
+  });
+
+  it('sums allocated site memory', async () => {
+    stubApi(dashboardHandler);
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText(/Total Alloc RAM: 1000 B \/ 7\.8 KB/)).not.toBeNull();
+    window.history.pushState({}, '', '/dashboard');
+  });
+
+  it('restarts the panel and lands on login', async () => {
+    vi.useFakeTimers();
+    try {
+      stubApi((url) => {
+        if (url === '/api/server/restart') return { ok: true, supervisor: 'unknown' };
+        if (url === '/api/health') return { ok: true };
+        return dashboardHandler(url);
+      });
+      await act(async () => {
+        render(<DashboardPage />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Restart panel'));
+      });
+      await act(async () => {
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart' }));
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(window.location.pathname).toBe('/login');
+    } finally {
+      window.history.pushState({}, '', '/dashboard');
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports manual restart on poll timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      stubApi((url) => {
+        if (url === '/api/server/restart') return { ok: true, supervisor: 'unknown' };
+        if (url === '/api/health') throw new Error('down');
+        return dashboardHandler(url);
+      });
+      await act(async () => {
+        render(<DashboardPage />);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Restart panel'));
+      });
+      await act(async () => {
+        fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart' }));
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(30000);
+      });
+      expect(screen.getByText(/Still down after 30s/)).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -40,6 +40,21 @@ function baseHandler(url: string): { status: number; json: unknown } {
   return { status: 200, json: { ok: true } };
 }
 
+const RICH_SITES = {
+  sites: [
+    { id: 'a1', name: 'web', type: 'node', path: 'server.js', port: 3000, running: true, pid: 1234, cpuPercent: 5, memBytes: 85 * 1048576, engineVersion: 'v24.1.0' },
+    { id: 'b2', name: 'blog', type: 'php', path: 'blog/index.php', port: 4000, running: false, pid: null, cpuPercent: null, memBytes: null, engineVersion: null },
+  ],
+};
+
+function statsLine(): string {
+  const paragraphs = Array.from(document.querySelectorAll('p.font-mono'));
+  for (const p of paragraphs) {
+    if ((p.textContent ?? '').includes('PID')) return p.textContent ?? '';
+  }
+  return '';
+}
+
 describe('web sites page', () => {
   it('filters by type tab and shows actions', async () => {
     stubApi((url) => baseHandler(url));
@@ -171,5 +186,45 @@ describe('web sites page', () => {
     });
     const save = calls.find((c) => c.url === '/api/sites' && c.method === 'POST');
     expect(save?.body).toMatchObject({ name: 'g', path: 'main.go', port: 9090, type: 'go' });
+  });
+
+  it('shows per-site stats and polls while running', async () => {
+    vi.useFakeTimers();
+    try {
+      const { calls } = stubApi((url) => (url === '/api/sites' ? { status: 200, json: RICH_SITES } : baseHandler(url)));
+      await act(async () => {
+        render(<SitesPage />);
+      });
+      expect(document.body.textContent).toContain('v24.1.0');
+      expect(statsLine()).toContain('PID 1234');
+      expect(statsLine()).toContain('5%');
+      expect(statsLine()).toContain('85.0 MB');
+      const before = calls.filter((c) => c.url === '/api/sites' && c.method === 'GET').length;
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(calls.filter((c) => c.url === '/api/sites' && c.method === 'GET').length).toBe(before + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling when nothing runs', async () => {
+    vi.useFakeTimers();
+    try {
+      const stopped = { sites: RICH_SITES.sites.map((s) => ({ ...s, running: false, pid: null, cpuPercent: null, memBytes: null, engineVersion: null })) };
+      const { calls } = stubApi((url) => (url === '/api/sites' ? { status: 200, json: stopped } : baseHandler(url)));
+      await act(async () => {
+        render(<SitesPage />);
+      });
+      expect(statsLine()).toContain('PID —');
+      const before = calls.filter((c) => c.url === '/api/sites' && c.method === 'GET').length;
+      await act(async () => {
+        vi.advanceTimersByTime(15000);
+      });
+      expect(calls.filter((c) => c.url === '/api/sites' && c.method === 'GET').length).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

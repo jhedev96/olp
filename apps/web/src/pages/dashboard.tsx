@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize, fmtUptime } from '../lib/format.js';
 import { navigateTo } from '../lib/router.js';
 import { Badge } from '../components/common/Badge.js';
 import { ComingSoon } from '../components/common/States.js';
+import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 
@@ -26,6 +27,7 @@ export interface DashSite {
   path: string;
   port: number;
   running: boolean;
+  memBytes: number | null;
 }
 
 /** `/api/services` row shape. */
@@ -67,14 +69,14 @@ function StatCard({ label, value, sub, bar }: { label: string; value: string; su
 
 /**
  * Dashboard (mockup dashboard parity): live system cards, filterable
- * site table with paths and open-links, store preview with install
+ * site table with paths and open-links, total allocated RAM sum,
+ * panel restart with health poll, store preview with install
  * shortcuts, conditional telegram card, live daemon section (ACTIVE
  * badges + best-effort START), and one tracked dummy (log tail
  * CAND-013). Poll failures keep the previous render (never blank) and
  * clean up on unmount. Hero pills for PM2/arch/wakelock and card
- * extras (CPU temp, per-core freq, ZRAM, FS type, battery thermal,
- * per-site memory) have no source and stay out (CAND-014/015);
- * restart-panel ships disabled (CAND-015).
+ * extras (CPU temp, per-core freq, ZRAM, FS type, battery thermal)
+ * have no source and stay out (CAND-014).
  */
 export function DashboardPage(): ReactElement {
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -84,6 +86,17 @@ export function DashboardPage(): ReactElement {
   const [daemonError, setDaemonError] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
   const [telegramOn, setTelegramOn] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartMsg, setRestartMsg] = useState('');
+  const restartTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (restartTimer.current !== null) clearInterval(restartTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -162,6 +175,45 @@ export function DashboardPage(): ReactElement {
   };
   const siteTypes = ['all', ...Array.from(new Set(sites.map((s) => s.type)))];
   const visibleSites = siteFilter === 'all' ? sites : sites.filter((s) => s.type === siteFilter);
+  const siteAlloc = sites.reduce((sum, site) => sum + (site.memBytes ?? 0), 0);
+
+  const confirmRestartAction = async (): Promise<void> => {
+    setConfirmRestart(false);
+    if (restarting) return;
+    setRestarting(true);
+    setRestartMsg('');
+    try {
+      const body = await apiJson<{ ok?: unknown }>('/api/server/restart', { method: 'POST' });
+      if (body.ok !== true) {
+        setRestartMsg('Restart failed');
+        setRestarting(false);
+        return;
+      }
+    } catch {
+      setRestartMsg('Restart failed');
+      setRestarting(false);
+      return;
+    }
+    // Sessions die with the process (in-memory, by design): once the
+    // socket answers again, land on login instead of a dead dashboard.
+    let tries = 0;
+    restartTimer.current = setInterval(() => {
+      void (async () => {
+        tries++;
+        try {
+          await apiJson('/api/health');
+          if (restartTimer.current !== null) clearInterval(restartTimer.current);
+          navigateTo('login');
+        } catch {
+          if (tries >= 15) {
+            if (restartTimer.current !== null) clearInterval(restartTimer.current);
+            setRestarting(false);
+            setRestartMsg('Still down after 30s — restart it manually (see Settings › Daemon reload).');
+          }
+        }
+      })();
+    }, 2000);
+  };
 
   return (
     <main className="p-4">
@@ -173,10 +225,15 @@ export function DashboardPage(): ReactElement {
         <Button size="sm" variant="outline" onClick={() => navigateTo('website')}>
           New website
         </Button>
-        <Button size="sm" variant="outline" disabled={true} title="Coming soon (CAND-015)">
-          Restart panel
+        <Button size="sm" variant="outline" onClick={() => setConfirmRestart(true)} disabled={restarting}>
+          {restarting ? 'Restarting…' : 'Restart panel'}
         </Button>
       </div>
+      {restartMsg !== '' && (
+        <p role="alert" className="mb-3 text-sm text-yellow-400">
+          {restartMsg}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <StatCard label="CPU" value={stats !== null ? stats.cpu.load1.toFixed(2) : '—'} sub={stats !== null ? `${stats.cpu.cores} core · ${stats.cpu.load5.toFixed(2)} / ${stats.cpu.load15.toFixed(2)}` : '—'} />
         <StatCard
@@ -197,6 +254,9 @@ export function DashboardPage(): ReactElement {
       <Card className="mt-4">
         <div className="mb-2 flex flex-wrap items-center gap-1">
           <h2 className="mr-auto font-bold">Websites</h2>
+          <span className="text-xs text-neutral-400">
+            {`Total Alloc RAM: ${fmtSize(siteAlloc)}${stats?.mem.total === undefined ? '' : ` / ${fmtSize(stats.mem.total)}`}`}
+          </span>
           {siteTypes.map((type) => (
             <Button key={type} size="sm" variant={siteFilter === type ? 'default' : 'ghost'} onClick={() => setSiteFilter(type)}>
               {type === 'all' ? `All (${sites.length})` : type}
@@ -309,6 +369,15 @@ export function DashboardPage(): ReactElement {
           )}
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmRestart}
+        title="Restart panel"
+        message="Restart the panel now? All sessions end (you will log in again), and without a supervisor (pm2/systemd) it stays down until started manually."
+        confirmLabel="Restart"
+        destructive={true}
+        onConfirm={() => void confirmRestartAction()}
+        onCancel={() => setConfirmRestart(false)}
+      />
     </main>
   );
 }
