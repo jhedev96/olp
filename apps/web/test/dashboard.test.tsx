@@ -86,8 +86,7 @@ describe('web dashboard page', () => {
     expect(screen.getByText('unavailable')).not.toBeNull();
   });
 
-  it('polls every 5 s and cleans up on unmount', async () => {    vi.useFakeTimers();
-    try {
+  it('polls every 5 s and cleans up on unmount', async () => {    vi.useFakeTimers();    try {
       const { calls } = stubApi((url) => (url === '/api/stats' ? STATS : SITES));
       let unmount = (): void => {};
       await act(async () => {
@@ -131,7 +130,7 @@ describe('web dashboard page', () => {
     });
     expect(screen.getByText('2 available')).not.toBeNull();
     expect(screen.getByText('Installed')).not.toBeNull();
-    expect(screen.getByText('CAND-013')).not.toBeNull();
+    expect(screen.getByText('Panel log')).not.toBeNull();
     expect(screen.queryByText('CAND-005')).toBeNull();
     expect(screen.getByRole('button', { name: 'Restart panel' })).toHaveProperty('disabled', false);
   });
@@ -235,5 +234,21 @@ describe('web dashboard page', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows the panel log tail with severity tones', async () => {
+    stubApi((url) => {
+      if (url === '/api/logs?tail=50') {
+        return { logs: [{ t: 1, level: 'info', msg: 'OLP boot (env=debian)' }, { t: 2, level: 'warn', msg: 'Chmod denied (x)' }] };
+      }
+      return dashboardHandler(url);
+    });
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+    expect(screen.getByText('Panel log')).not.toBeNull();
+    expect(screen.getByText('OLP boot (env=debian)')).not.toBeNull();
+    expect(screen.getByText('Chmod denied (x)')).not.toBeNull();
+    expect(screen.queryByText('Panel log tail')).toBeNull();
   });
 });

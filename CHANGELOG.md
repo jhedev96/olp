@@ -100,6 +100,9 @@ Termux/Alpine/macOS hardware.
   with expected-logout UX). Unit/integration green (auth 32,
   server 203, web 176); behavioral proof rides the phase-26
   HUMAN GATE.
+- Ops dummies sweep wave 19 (code complete, live gate PENDING —
+  box OOM): octal `mode` + jailed chmod, stat-only mounts probe,
+  fixed-list log ring + tail endpoint; dashboard + files wired.
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

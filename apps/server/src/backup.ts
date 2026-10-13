@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { defaultExec } from './exec.js';
+import type { LogFeed } from './logring.js';
 import { relOf, safePath } from './files.js';
 import { nextRunMs, parseCronSchedule } from './cron-schedule.js';
 import { parseAuthConfig, verifyPassword } from '@olp/auth';
@@ -57,6 +58,8 @@ export interface BackupOptions {
   now?: () => number;
   /** Bundle discovery (absent → bundle endpoints answer unavailable). */
   bundle?: BundleDiscovery;
+  /** Log feed (absent → silent; finish lines only, never secrets). */
+  log?: LogFeed;
 }
 
 /** Full-system bundle part kinds (manifest-level; archives reuse normal sidecars). */
@@ -114,6 +117,8 @@ export interface BundleDiscovery {
   writeCronLines: (lines: string[]) => Promise<void>;
   /** Revoke every session (credential restore logs the operator out). */
   revokeSessions: () => void;
+  /** Log feed (absent → silent; job-finish lines only). */
+  log?: LogFeed;
 }
 
 /** Inputs for {@link runBundleSnapshot} (shared by the route and tests). */
@@ -368,11 +373,14 @@ export async function runBundleSnapshot(
     }
     job.state = 'done';
     job.finished = deps.now();
+    deps.discovery.log?.('info', `Bundle snapshot ${job.id} done`);
     return job;
   } catch (err) {
     const step: BundleStep = { key: 'snapshot', label: 'Snapshot', status: 'pending', detail: '' };
     job.steps.push(step);
-    return fail(step, err);
+    const out = fail(step, err);
+    deps.discovery.log?.('warn', `Bundle snapshot ${job.id} failed`);
+    return out;
   }
 }
 
@@ -541,6 +549,7 @@ export async function runBundleRestore(
 
   job.state = failed ? 'failed' : 'done';
   job.finished = deps.now();
+  deps.discovery.log?.(failed ? 'warn' : 'info', `Bundle restore ${job.id} ${failed ? 'failed' : 'done'}`);
   return job;
 }
 
@@ -1011,6 +1020,7 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
       source: strField(body, 'source'),
       gzip: body['gzip'] === true,
     });
+    opts.log?.('info', `Backup created (${created.name})`);
     return { ok: true, name: created.name };
   });
 
@@ -1164,6 +1174,7 @@ export function registerBackupRoutes(app: FastifyInstance, opts: BackupOptions):
         );
       }
     }
+    opts.log?.('info', `Backup restored (${name})`);
     return { ok: true };
   });
 

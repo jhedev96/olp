@@ -257,10 +257,10 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 29 — Ops dummies sweep wave 19 (013/016/019; spec approved 2026-10-13)
 
-- [~] W19-00 planning: spec + tasks + todos (`SPECS/spec-ops-sweep-wave.md`, `TASKS/phase-29-ops-sweep-wave.md`)
-- [ ] W19-01 files mode + chmod + tests
-- [ ] W19-02 mounts endpoint + tests
-- [ ] W19-03 log ring + endpoint + tests
-- [ ] W19-04 smoke extension (live or recorded-deferred)
-- [ ] W19-05 frontend wiring
-- [ ] W19-06 docs + CAND-013/016/019 close
+- [x] W19-00 planning: spec + tasks + todos (`SPECS/spec-ops-sweep-wave.md`, `TASKS/phase-29-ops-sweep-wave.md`)
+- [x] W19-01 files mode + chmod + tests
+- [x] W19-02 mounts endpoint + tests
+- [x] W19-03 log ring + endpoint + tests
+- [x] W19-04 smoke extension (written; live run deferred)
+- [x] W19-05 frontend wiring
+- [x] W19-06 docs + CAND-013/016/019 close

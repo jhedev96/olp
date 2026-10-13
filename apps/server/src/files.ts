@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import type { FastifyInstance } from 'fastify';
 import { defaultExec, quoteSingle } from './exec.js';
 import type { ExecFn } from './exec.js';
+import type { LogFeed } from './logring.js';
 
 /** Binary upload cap (50 MB, Terwo parity). */
 const MAX_UPLOAD = 50 * 1024 * 1024;
@@ -73,6 +74,8 @@ interface FileEntry {
   type: 'dir' | 'file';
   size: number;
   mtime: number;
+  /** Octal mode (`0755` style) or `null` when the stat failed. */
+  mode: string | null;
 }
 
 async function listDir(dir: string): Promise<FileEntry[]> {
@@ -82,14 +85,16 @@ async function listDir(dir: string): Promise<FileEntry[]> {
     const full = join(dir, entry.name);
     let size = 0;
     let mtime = 0;
+    let mode: string | null = null;
     try {
       const st = await fsp.stat(full);
       size = st.size;
       mtime = st.mtimeMs;
+      mode = (st.mode & 0o777).toString(8).padStart(4, '0');
     } catch {
       // best effort: keep the entry with zeroed stats
     }
-    out.push({ name: entry.name, type: entry.isDirectory() ? 'dir' : 'file', size, mtime });
+    out.push({ name: entry.name, type: entry.isDirectory() ? 'dir' : 'file', size, mtime, mode });
   }
   out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
   return out;
@@ -115,6 +120,8 @@ export interface FilesOptions {
   root: string;
   /** Shell runner for zip/unzip (tests inject fakes). */
   exec?: ExecFn;
+  /** Log feed (absent → silent; denial lines only, never secrets). */
+  log?: LogFeed;
 }
 
 /**
@@ -160,6 +167,29 @@ export function registerFilesRoutes(app: FastifyInstance, opts: FilesOptions): v
       recursive: true,
       force: true,
     });
+    return { ok: true };
+  });
+
+  app.post('/api/chmod', { bodyLimit: SMALL_BODY }, async (req) => {
+    const body = ((req.body ?? {}) as Record<string, unknown>);
+    const full = join(safePath(opts.root, strField(body, 'path')), safeName(body['name']));
+    const mode = typeof body['mode'] === 'string' ? body['mode'].trim() : '';
+    if (!/^[0-7]{3,4}$/.test(mode)) {
+      opts.log?.('warn', `Chmod denied (${String(body['name'] ?? '?')})`);
+      throw new Error('Invalid mode (octal, e.g. 0644)');
+    }
+    const lst = await fsp.lstat(full).catch(() => null);
+    if (lst === null) {
+      opts.log?.('warn', `Chmod denied (${String(body['name'] ?? '?')})`);
+      throw new Error('Path not found');
+    }
+    // Symlink health stays CAND-014: never chmod through a link
+    // (lstat/chmod TOCTOU accepted residual, same class as wave-2 kill).
+    if (lst.isSymbolicLink()) {
+      opts.log?.('warn', `Chmod denied (${String(body['name'] ?? '?')})`);
+      throw new Error('Symlinks cannot be chmodded');
+    }
+    await fsp.chmod(full, Number.parseInt(mode, 8));
     return { ok: true };
   });
 
