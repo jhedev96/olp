@@ -302,6 +302,30 @@ const got = await new Promise((resolve) => {
 check('terminal pipe echo', got.includes('WS-SMOKE-123'));
 ws.terminate();
 
+// editable bind wave 13 (file bind persists; restart exits LAST —
+// the summary below is client-side only, no requests after death)
+const bindSave = json('POST', '/api/settings/bind', { host: '127.0.0.1', port: 18084 });
+check('bind save file', bindSave.ok === true && bindSave.restartRequired === true);
+const bindAfter = json('GET', '/api/settings').bind;
+check(
+  'bind env precedence live',
+  bindAfter.source === 'env' && bindAfter.port === Number(new URL(BASE).port) && bindAfter.effectivePort === Number(new URL(BASE).port),
+);
+check('bind invalid 400', json('POST', '/api/settings/bind', { host: 'x', port: 80 }).error.includes('1024'));
+const restart = json('POST', '/api/server/restart', {});
+check('restart ok', restart.ok === true && typeof restart.supervisor === 'string');
+let restartGone = false;
+for (let i = 0; i < 5; i++) {
+  execSync('sleep 2');
+  try {
+    execFileSync('curl', ['-s', '-o', '/dev/null', '--max-time', '2', `${BASE}/healthz`], { encoding: 'utf8' });
+  } catch {
+    restartGone = true;
+    break;
+  }
+}
+check('restart exits', restartGone);
+
 console.log(results.map(([s, n]) => `${s} ${n}`).join('\n'));
 const fails = results.filter(([s]) => s === 'FAIL').length;
 console.log(fails === 0 ? 'SMOKE ALL GREEN' : `SMOKE ${fails} FAILURES`);

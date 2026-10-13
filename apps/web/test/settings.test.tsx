@@ -34,7 +34,7 @@ const SESSIONS = {
 
 const SETTINGS_BIND = {
   ...SETTINGS,
-  bind: { host: '127.0.0.1', port: 8080, loopback: true },
+  bind: { host: '127.0.0.1', port: 8080, loopback: true, source: 'default', effectiveHost: '127.0.0.1', effectivePort: 8080, fallback: false },
 };
 
 function sessionsHandler(url: string): { status: number; json: unknown } {
@@ -269,6 +269,127 @@ describe('web settings page', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     });
     expect(calls.some((c) => c.url === '/api/auth/passkeys/cred-1' && c.method === 'DELETE')).toBe(true);
+  });
+
+  it('edits binds with env guard, save, mismatch, and restart flows', async () => {
+    // Env-managed: editor disabled with an honest note.
+    stubApi((url) => {
+      if (url === '/api/settings') {
+        return {
+          status: 200,
+          json: { ...SETTINGS, bind: { host: '0.0.0.0', port: 8080, loopback: false, source: 'env', effectiveHost: '0.0.0.0', effectivePort: 8080, fallback: false } },
+        };
+      }
+      return sessionsHandler(url);
+    });
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    expect(screen.getByLabelText('Bind host')).toHaveProperty('disabled', true);
+    expect(screen.getByText('Managed by PANEL_HOST/PANEL_PORT env — unset them to use the file.')).not.toBeNull();
+    document.body.innerHTML = '';
+
+    // Save posts + flags restart; invalid shapes error inline.
+    const { calls } = stubApi((url, method, body) => {
+      if (url === '/api/settings') return { status: 200, json: SETTINGS_BIND };
+      if (url === '/api/settings/bind') {
+        const port = (body as { port?: unknown }).port;
+        if (port === 80) return { status: 400, json: { error: 'Port must be an integer 1024-65535 (privileged ports need root)' } };
+        return { status: 200, json: { ok: true, restartRequired: true } };
+      }
+      return sessionsHandler(url);
+    });
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    fireEvent.change(screen.getByLabelText('Bind port'), { target: { value: '9090' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save bind'));
+    });
+    expect(calls.find((c) => c.url === '/api/settings/bind')?.body).toMatchObject({ host: '127.0.0.1', port: 9090 });
+    expect(screen.getByText('Restart required for the new bind to apply.')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Bind port'), { target: { value: '80' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save bind'));
+    });
+    expect(screen.getByRole('alert').textContent).toContain('1024');
+    document.body.innerHTML = '';
+
+    // Mismatch warning on fallback.
+    stubApi((url) => {
+      if (url === '/api/settings') {
+        return {
+          status: 200,
+          json: { ...SETTINGS, bind: { host: '127.0.0.1', port: 9090, loopback: true, source: 'file', effectiveHost: '127.0.0.1', effectivePort: 8080, fallback: true } },
+        };
+      }
+      return sessionsHandler(url);
+    });
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+    expect(screen.getByRole('alert').textContent).toContain('fell back to localhost');
+    document.body.innerHTML = '';
+
+    // Restart polls health, then lands on login.
+    const seen: string[] = [];
+    const laters: Array<() => void> = [];
+    let healthCalls = 0;
+    stubApi((url) => {
+      if (url === '/api/settings') return { status: 200, json: SETTINGS_BIND };
+      if (url === '/api/server/restart') return { status: 200, json: { ok: true, supervisor: 'pm2' } };
+      if (url === '/api/health') {
+        healthCalls++;
+        return { status: 200, json: { ok: true } };
+      }
+      return sessionsHandler(url);
+    });
+    await act(async () => {
+      render(<SettingsPage goto={(url) => seen.push(url)} later={(fn) => laters.push(fn)} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Restart panel'));
+    });
+    expect(screen.getByRole('dialog').textContent).toContain('supervisor');
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart' }));
+    });
+    for (let i = 0; i < 15 && seen.length === 0; i++) {
+      const tick = laters.shift();
+      if (tick === undefined) break;
+      await act(async () => {
+        tick();
+      });
+    }
+    expect(healthCalls).toBeGreaterThan(0);
+    expect(seen).toEqual(['/login']);
+    document.body.innerHTML = '';
+
+    // Poll timeout tells the user to restart manually.
+    const laters2: Array<() => void> = [];
+    stubApi((url) => {
+      if (url === '/api/settings') return { status: 200, json: SETTINGS_BIND };
+      if (url === '/api/server/restart') return { status: 200, json: { ok: true, supervisor: 'unknown' } };
+      if (url === '/api/health') return { status: 500, json: { error: 'down' } };
+      return sessionsHandler(url);
+    });
+    await act(async () => {
+      render(<SettingsPage goto={() => undefined} later={(fn) => laters2.push(fn)} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Restart panel'));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart' }));
+    });
+    for (let i = 0; i < 15; i++) {
+      const tick = laters2.shift();
+      if (tick === undefined) break;
+      await act(async () => {
+        tick();
+      });
+    }
+    expect(screen.getByText(/Still down after 30s/)).not.toBeNull();
   });
 
   it('revokes a session through the dialog and reloads', async () => {

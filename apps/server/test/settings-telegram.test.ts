@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
 import { botReply, formatUptime } from '../src/telegram.js';
+import { resolveBind, validateBind } from '../src/settings.js';
 import type { BotStatus, TelegramApi, TelegramUpdate } from '../src/telegram.js';
 import type { Settings, TelegramSettings } from '../src/settings.js';
 
@@ -306,8 +307,7 @@ describe('server settings routes', () => {
     });
   });
 
-  it('resolves bind from boot env keys with safe defaults', async () => {
-    const { currentBind } = await import('../src/settings.js');
+  it('resolves bind from boot env keys with safe defaults', async () => {    const { currentBind } = await import('../src/settings.js');
     const savedHost = process.env['PANEL_HOST'];
     const savedPort = process.env['PANEL_PORT'];
     try {
@@ -324,6 +324,149 @@ describe('server settings routes', () => {
       else process.env['PANEL_HOST'] = savedHost;
       if (savedPort === undefined) delete process.env['PANEL_PORT'];
       else process.env['PANEL_PORT'] = savedPort;
+    }
+  });
+
+  it('saves file binds with restart-required and validates shapes', async () => {
+    const savedHost = process.env['PANEL_HOST'];
+    const savedPort = process.env['PANEL_PORT'];
+    delete process.env['PANEL_HOST'];
+    delete process.env['PANEL_PORT'];
+    try {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+    const settings = memorySettings();
+    const api = makeApi();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      settingsStore: settings.store,
+      telegramApi: api,
+    });
+    const cookie = await authedCookie(app);
+
+    const before = await app.inject({ method: 'GET', url: '/api/settings', headers: { cookie } });
+    expect(before.json().bind).toMatchObject({
+      host: '127.0.0.1',
+      port: 8080,
+      loopback: true,
+      source: 'default',
+      effectiveHost: '127.0.0.1',
+      effectivePort: 8080,
+      fallback: false,
+    });
+
+    for (const payload of [
+      { host: '127.0.0.1', port: 80 },
+      { host: 'has space', port: 9090 },
+      { host: '127.0.0.1', port: 99999 },
+      { host: '127.0.0.1' },
+      {},
+    ]) {
+      const bad = await app.inject({ method: 'POST', url: '/api/settings/bind', headers: { cookie }, payload });
+      expect(bad.statusCode).toBe(400);
+      expect(typeof bad.json().error).toBe('string');
+    }
+
+    const saved = await app.inject({
+      method: 'POST',
+      url: '/api/settings/bind',
+      headers: { cookie },
+      payload: { host: '127.0.0.1', port: 9090 },
+    });
+    expect(saved.json()).toEqual({ ok: true, restartRequired: true });
+    expect(settings.saved).toBe(1);
+
+    const after = await app.inject({ method: 'GET', url: '/api/settings', headers: { cookie } });
+    // Persisted and re-resolved, but the live socket is untouched (effective still default).
+    expect(after.json().bind).toMatchObject({ host: '127.0.0.1', port: 9090, source: 'file', effectivePort: 8080 });
+    expect((await app.inject({ method: 'POST', url: '/api/settings/bind', headers: { cookie }, payload: { host: 'x', port: 1 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/settings/bind', headers: { cookie } })).statusCode).toBe(404);
+    } finally {
+      if (savedHost === undefined) delete process.env['PANEL_HOST'];
+      else process.env['PANEL_HOST'] = savedHost;
+      if (savedPort === undefined) delete process.env['PANEL_PORT'];
+      else process.env['PANEL_PORT'] = savedPort;
+    }
+  });
+
+  it('restarts through the seam without killing the runner', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const exits: number[] = [];
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      settingsStore: memorySettings().store,
+      telegramApi: makeApi(),
+      settingsRestart: { exit: (code) => { exits.push(code); }, supervisor: () => 'test-sup' },
+    });
+    const cookie = await authedCookie(app);
+    expect((await app.inject({ method: 'POST', url: '/api/server/restart' })).statusCode).toBe(401);
+    const res = await app.inject({ method: 'POST', url: '/api/server/restart', headers: { cookie } });
+    expect(res.json()).toEqual({ ok: true, supervisor: 'test-sup' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(exits).toEqual([0]);
+  });
+
+  it('falls back on taken ports and rethrows foreign errors', async () => {
+    const { listenWithFallback } = await import('../src/index.js');
+    const calls: Array<{ port: number; host: string }> = [];
+    const stubFor = (code: string | null) => {
+      let primary = true;
+      return {
+        listen: async ({ port, host }: { port: number; host: string }) => {
+          calls.push({ port, host });
+          // Only the primary bind fails; the fallback always succeeds.
+          if (code !== null && primary) {
+            primary = false;
+            throw Object.assign(new Error('bind fail'), { code });
+          }
+        },
+      };
+    };
+    const report = () => ({ configured: { host: '0.0.0.0', port: 9999 }, source: 'file' as const, effective: { host: '0.0.0.0', port: 9999 }, fallback: false });
+
+    const ok = report();
+    await listenWithFallback(stubFor(null), ok);
+    expect(ok).toMatchObject({ effective: { host: '0.0.0.0', port: 9999 }, fallback: false });
+
+    const busy = report();
+    await listenWithFallback(stubFor('EADDRINUSE'), busy, { host: '127.0.0.1', port: 18081 });
+    expect(calls.at(-1)).toEqual({ port: 18081, host: '127.0.0.1' });
+    expect(busy).toMatchObject({ effective: { host: '127.0.0.1', port: 18081 }, fallback: true });
+
+    await expect(listenWithFallback(stubFor('EIO'), report())).rejects.toThrow('bind fail');
+  });
+
+  it('falls back on a really occupied port', async () => {
+    const { createServer } = await import('node:net');
+    const { listenWithFallback } = await import('../src/index.js');
+    const squat = createServer();
+    await new Promise<void>((resolve) => squat.listen(0, '127.0.0.1', resolve));
+    const taken = (squat.address() as { port: number }).port;
+    try {
+      const { dataDir, legacyDir, root } = freshWorkspace();
+      const { app, bind } = buildServer({
+        dataDir,
+        legacyDir,
+        env: fakeEnv,
+        sysDeps: quietDeps(),
+        root,
+        settingsStore: memorySettings().store,
+        telegramApi: makeApi(),
+      });
+      bind.configured = { host: '127.0.0.1', port: taken };
+      await listenWithFallback(app, bind, { host: '127.0.0.1', port: 0 });
+      expect(bind.fallback).toBe(true);
+      expect(bind.effective.port).not.toBe(taken);
+      await app.close();
+    } finally {
+      squat.close();
     }
   });
 });
@@ -407,5 +550,39 @@ describe('server telegram bot', () => {
     doneCb?.(0, null);
     await new Promise((r) => setTimeout(r, 50));
     expect(api.sent.at(-1)?.text).toBe('✅ Install Redis finished (exit 0)');
+  });
+});
+
+describe('server bind resolve and validate', () => {
+  it('validates hosts and ports with naming errors', () => {
+    expect(validateBind('127.0.0.1', 8080)).toEqual({ ok: true, bind: { host: '127.0.0.1', port: 8080 } });
+    expect(validateBind('::1', 9090)).toEqual({ ok: true, bind: { host: '::1', port: 9090 } });
+    expect(validateBind('panel.lan', 8080).ok).toBe(true);
+    expect(validateBind('', 8080)).toMatchObject({ ok: false });
+    expect(validateBind('has space', 8080).ok).toBe(false);
+    expect(validateBind('127.0.0.1; rm -rf', 8080).ok).toBe(false);
+    expect(validateBind('127.0.0.1', 80)).toMatchObject({ ok: false, error: expect.stringContaining('1024') });
+    expect(validateBind('127.0.0.1', 80.5).ok).toBe(false);
+    expect(validateBind('127.0.0.1', 99999).ok).toBe(false);
+    expect(validateBind('127.0.0.1', '8080').ok).toBe(false);
+  });
+
+  it('resolves env over file over default with fall-through', () => {
+    expect(resolveBind({}, null)).toEqual({ bind: { host: '127.0.0.1', port: 8080 }, source: 'default' });
+    expect(resolveBind({ PANEL_HOST: '0.0.0.0', PANEL_PORT: '9090' }, { host: '127.0.0.1', port: 7070 })).toEqual({
+      bind: { host: '0.0.0.0', port: 9090 },
+      source: 'env',
+    });
+    expect(resolveBind({ PANEL_PORT: '9090' }, null)).toEqual({ bind: { host: '127.0.0.1', port: 9090 }, source: 'env' });
+    expect(resolveBind({}, { host: '127.0.0.1', port: 7070 })).toEqual({
+      bind: { host: '127.0.0.1', port: 7070 },
+      source: 'file',
+    });
+    // Invalid values fall through instead of crashing boot.
+    expect(resolveBind({ PANEL_HOST: 'has space', PANEL_PORT: '80' }, { host: '127.0.0.1', port: 7070 })).toMatchObject({
+      source: 'file',
+    });
+    expect(resolveBind({ PANEL_HOST: 'has space' }, { host: 'nope nope', port: 1 })).toMatchObject({ source: 'default' });
+    expect(resolveBind({ PANEL_PORT: 'junk' }, null)).toMatchObject({ source: 'default' });
   });
 });

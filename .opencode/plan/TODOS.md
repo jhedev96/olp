@@ -200,10 +200,10 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 23 — Editable bind + restart wave 13 (careful plan; spec approved 2026-10-12)
 
-- [~] W13-00 planning: spec + tasks + todos (`SPECS/spec-bind-wave.md`, `TASKS/phase-23-bind-wave.md`)
-- [ ] W13-01 settings schema + resolve/validate + matrix tests
-- [ ] W13-02 bind endpoints + report holder + tests
-- [ ] W13-03 boot resolve + fallback + restart + tests
-- [ ] W13-04 smoke extension + live ALL GREEN
-- [ ] W13-05 frontend bind editor + restart flow
-- [ ] W13-06 docs + CAND-037 close + 015-note
+- [x] W13-00 planning: spec + tasks + todos (`SPECS/spec-bind-wave.md`, `TASKS/phase-23-bind-wave.md`)
+- [x] W13-01 settings schema + resolve/validate + matrix tests
+- [x] W13-02 bind endpoints + report holder + tests
+- [x] W13-03 boot resolve + fallback + restart + tests
+- [x] W13-04 smoke extension + live ALL GREEN
+- [x] W13-05 frontend bind editor + restart flow
+- [x] W13-06 docs + CAND-037 close + 015-note

@@ -71,6 +71,10 @@ Termux/Alpine/macOS hardware.
   `POST /api/login/local` (strict peer gate, residual recorded);
   login + settings wired; smoke options-shapes + local ALL GREEN
   (70+ live); real-authenticator proof stays a HUMAN GATE.
+- Editable bind + restart wave 13: file bind (env precedence) +
+  validation + save/restart endpoints + localhost fallback +
+  supervisor-aware restart with login redirect; settings editor
+  wired; smoke save/restart-exit ALL GREEN (75 live).
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
