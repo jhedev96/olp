@@ -28,6 +28,8 @@ import { nodeBackupSys, registerBackupRoutes, startBackupScheduler } from './bac
 import type { BackupSystem } from './backup.js';
 import { nodeCronBackend, parseCronLine, registerCronRoutes } from './cron.js';
 import type { CronJob } from './cron.js';
+import { createLogRing, registerLogRoutes } from './logring.js';
+import type { LogRing } from './logring.js';
 import type { CronBackend } from './cron.js';
 import { registerServicesRoutes } from './services.js';
 import type { ServicesControllerOf } from './services.js';
@@ -106,6 +108,8 @@ export interface ServerOptions {
   servicesControllerOf?: ServicesControllerOf;
   /** Passkey ceremony override for auth tests (production uses the real lib). */
   passkeyOps?: PasskeyOps;
+  /** Log ring override for tests (production uses a fresh ring + boot line). */
+  logs?: LogRing;
   /** Web `dist` dir override; `null` forces API-only mode (tests). */
   webDir?: string | null;
 }
@@ -135,13 +139,18 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
 
   const auth = createAuthContext(dataDir, legacyDir, { passkeyOps: opts.passkeyOps });
   migrateLegacy(dataDir, legacyDir);
+  const logs: LogRing = opts.logs ?? createLogRing();
+  const feed = (level: 'info' | 'warn' | 'error', msg: string): void => logs.append(level, msg);
+  auth.log = feed;
+  logs.append('info', `OLP boot (env=${env.id})`);
   registerAuthRoutes(app, auth);
+  registerLogRoutes(app, logs);
   registerStatsRoutes(app, { env, deps: sysDeps, root });
   // One sampler shared by monitor + sites (single delta timeline).
   const sampler: MonitorSampler = opts.monitorSampler ?? createMonitorSampler();
   registerMonitorRoutes(app, { env, deps: sysDeps, root, kill: opts.monitorKill, sampler });
   registerServicesRoutes(app, { env, deps: sysDeps, controllerOf: opts.servicesControllerOf });
-  registerFilesRoutes(app, { root, exec: sysDeps.exec });
+  registerFilesRoutes(app, { root, exec: sysDeps.exec, log: feed });
   registerMountsRoutes(app, { env, root, home: homedir() });
   const siteStore = opts.siteStore ?? fileSiteStore(auth.dataDir);
   const siteRuntime = createSiteRuntime();
@@ -181,8 +190,8 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     root,
     sys: opts.backupSys ?? nodeBackupSys(),
     dbConfig: bundleDbConfig,
-    bundle: {
-      listDatabases: async (engine) => {
+    log: feed,
+    bundle: {      listDatabases: async (engine) => {
         try {
           const conn = await dbDrivers[engine].connect(bundleDbConfig(engine));
           try {
@@ -205,6 +214,7 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
       readCronLines: () => cronBackend.readLines(),
       writeCronLines: (lines) => cronBackend.writeLines(lines),
       revokeSessions: () => auth.store.revokeAll(),
+      log: feed,
     },
   });
   startBackupScheduler({

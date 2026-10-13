@@ -14,6 +14,7 @@ import {
   verifyCredentials,
 } from '@olp/auth';
 import type { AuthConfig, PasskeyCredential, SessionMeta } from '@olp/auth';
+import type { LogFeed } from './logring.js';
 import { REMEMBER_MAX_AGE, REMEMBER_TTL_MS } from '@olp/auth';
 import { ChallengeMap, nodePasskeyOps } from './passkey.js';
 import type { PasskeyOps } from './passkey.js';
@@ -47,6 +48,8 @@ export interface AuthContext {
   passkeys: PasskeyOps;
   /** Pending-ceremony challenges (memory-only, like sessions). */
   challenges: ChallengeMap;
+  /** Log feed (absent → silent; username-only lines, never secrets). */
+  log?: LogFeed;
 }
 
 /**
@@ -161,6 +164,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
   app.post('/api/login', { bodyLimit: 1048576 }, async (req, reply) => {
     const body = (req.body ?? {}) as LoginBody;
     if (!verifyCredentials(body.username, body.password, ctx.config)) {
+      ctx.log?.('warn', `Login failed (${typeof body.username === 'string' ? body.username : '?'})`);
       reply.code(401);
       return { error: 'Invalid username or password' };
     }
@@ -168,6 +172,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AuthContext): void
     // one without the other is a bug by definition.
     const remember = body.remember === true;
     const token = ctx.store.create(requestMeta(req), remember ? { ttlMs: REMEMBER_TTL_MS } : undefined);
+    ctx.log?.('info', `Login ok (${ctx.config.username})`);
     reply.header('Set-Cookie', loginCookie(token, remember ? REMEMBER_MAX_AGE : undefined));
     return { ok: true };
   });

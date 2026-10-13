@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import type { FastifyInstance } from 'fastify';
 import { defaultExec, quoteSingle } from './exec.js';
 import type { ExecFn } from './exec.js';
+import type { LogFeed } from './logring.js';
 
 /** Binary upload cap (50 MB, Terwo parity). */
 const MAX_UPLOAD = 50 * 1024 * 1024;
@@ -119,6 +120,8 @@ export interface FilesOptions {
   root: string;
   /** Shell runner for zip/unzip (tests inject fakes). */
   exec?: ExecFn;
+  /** Log feed (absent → silent; denial lines only, never secrets). */
+  log?: LogFeed;
 }
 
 /**
@@ -171,12 +174,21 @@ export function registerFilesRoutes(app: FastifyInstance, opts: FilesOptions): v
     const body = ((req.body ?? {}) as Record<string, unknown>);
     const full = join(safePath(opts.root, strField(body, 'path')), safeName(body['name']));
     const mode = typeof body['mode'] === 'string' ? body['mode'].trim() : '';
-    if (!/^[0-7]{3,4}$/.test(mode)) throw new Error('Invalid mode (octal, e.g. 0644)');
+    if (!/^[0-7]{3,4}$/.test(mode)) {
+      opts.log?.('warn', `Chmod denied (${String(body['name'] ?? '?')})`);
+      throw new Error('Invalid mode (octal, e.g. 0644)');
+    }
     const lst = await fsp.lstat(full).catch(() => null);
-    if (lst === null) throw new Error('Path not found');
+    if (lst === null) {
+      opts.log?.('warn', `Chmod denied (${String(body['name'] ?? '?')})`);
+      throw new Error('Path not found');
+    }
     // Symlink health stays CAND-014: never chmod through a link
     // (lstat/chmod TOCTOU accepted residual, same class as wave-2 kill).
-    if (lst.isSymbolicLink()) throw new Error('Symlinks cannot be chmodded');
+    if (lst.isSymbolicLink()) {
+      opts.log?.('warn', `Chmod denied (${String(body['name'] ?? '?')})`);
+      throw new Error('Symlinks cannot be chmodded');
+    }
     await fsp.chmod(full, Number.parseInt(mode, 8));
     return { ok: true };
   });
