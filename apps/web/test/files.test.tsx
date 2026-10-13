@@ -366,4 +366,45 @@ describe('web files page', () => {
     expect(button).toHaveProperty('disabled', true);
     expect(button.getAttribute('title')).toBe('Prettier has no txt parser here');
   });
+
+  it('docks the editor beside the list instead of a modal', async () => {
+    stubApi(filesHandler);
+    await openFirstEditor();
+    expect(document.querySelector('.fixed.inset-0')).toBeNull();
+    expect(screen.getByLabelText('Code panel')).not.toBeNull();
+    expect(screen.getByText('docs')).not.toBeNull();
+    expect(screen.getAllByText('a.txt')).toHaveLength(2);
+    expect(document.querySelector('.cm-editor')).not.toBeNull();
+  });
+
+  it('closes the panel with Escape', async () => {
+    stubApi(filesHandler);
+    await openFirstEditor();
+    expect(screen.getByLabelText('Code panel')).not.toBeNull();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+    });
+    expect(screen.queryByLabelText('Code panel')).toBeNull();
+  });
+
+  it('toggles between editor and preview in one panel', async () => {
+    stubApi(filesHandler);
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Edit')[0] as HTMLElement);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('View')[0] as HTMLElement);
+    });
+    expect(screen.getByRole('button', { name: 'Editor' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Preview' })).not.toBeNull();
+    expect(document.querySelector('.cm-editor')).toBeNull();
+    expect(screen.getByText('hello')).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Editor' }));
+    });
+    expect(document.querySelector('.cm-editor')).not.toBeNull();
+  });
 });
