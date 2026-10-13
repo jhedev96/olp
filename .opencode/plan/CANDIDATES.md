@@ -42,7 +42,8 @@
 | CAND-033 | ~~Editor prettify + diff view~~ | Shipped wave 10: Prettier core set (lazy chunks) + unified diff panel (CLOSED 2026-10-12) | php/py/sql/sh honestly unsupported; `diff` dep rejected (ADR-006) |
 | CAND-034 | ~~Terminal snippet/macro runners (desktop macros row + mobile one-touch runners)~~ | Shipped wave 11: macros row + customs + destructive confirm (CLOSED 2026-10-12) | Local-only storage; guard is UX, not a boundary |
 | CAND-035 | ~~Backup full-system bundle (databases + crons + configs)~~ | Wave 16 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — manifest + snapshot/restore jobs + smoke + page wired; unit/integration green, behavioral proof is a HUMAN GATE | Split from CAND-029 in wave 6; auth inclusion splits to CAND-038 |
-| CAND-038 | Bundle auth-config inclusion (careful planning) | NEW wave 16: `config.json` restore risks lockout; needs its own design | Split from CAND-035 in wave 16 (human-locked) |
+| CAND-038 | Bundle auth-config inclusion (reauth + rollback + revoke) | Wave 17 spec approved 2026-10-13 (human-locked A): `auth.json` rides configs, restore last with password reauth, rollback copy, revoke-all | Split from CAND-035 in wave 16 |
+| CAND-039 | Code formatter parser expansion (php/py/sql/sh) | NEW: editor/preview cover php/py/sql already; only Prettier formatting is core-set-only (residual of CAND-033) | Split from CAND-033 in wave 17 planning |
 | CAND-036 | ~~Store per-env mirror detection + purge-cache~~ | Wave 15 merged UNTESTED live 2026-10-13 (human decision; box inadequate) — unit/integration green, behavioral proof is a HUMAN GATE | Brew attempt null-safe; metalink hosts honestly excluded |
 | CAND-037 | ~~Editable bind with restart flow~~ | Shipped wave 13: file bind + validation + restart + fallback (CLOSED 2026-10-13) | systemd/PM2 generation stays out (installers own it) |
 

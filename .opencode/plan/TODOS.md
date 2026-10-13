@@ -238,3 +238,12 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W16-05 frontend wiring
 - [x] W16-06 docs (CAND-035 merged UNTESTED, CAND-038 opened, human gate below)
 - [ ] HUMAN GATE: bundle live proof (snapshot configs/crons → parts verify → restore-all done → cleanup; record PASS/FAIL here)
+
+## Phase 27 — Auth-config bundle wave 17 (reauth + rollback + revoke; spec approved 2026-10-13)
+
+- [~] W17-00 planning: spec + tasks + todos (`SPECS/spec-auth-bundle-wave.md`, `TASKS/phase-27-auth-bundle-wave.md`)
+- [ ] W17-01 parseAuthConfig export + tests
+- [ ] W17-02 snapshot auth.json + hasAuth + restore-auth step + revoke wiring + tests
+- [ ] W17-03 smoke extension (live run deferred with phase 26)
+- [ ] W17-04 frontend password field + logout copy + tests
+- [ ] W17-05 docs + CAND-038 close
