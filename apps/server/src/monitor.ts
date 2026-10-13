@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { Environment } from '@olp/env-core';
 import type { SysDeps } from '@olp/sysinfo';
 import { createMonitorSampler, decideKill, sampleProcesses, sampleSummary } from '@olp/sysinfo';
-import type { KillDeps, KillSignal, KillVerdict } from '@olp/sysinfo';
+import type { KillDeps, KillSignal, KillVerdict, MonitorSampler } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 
 /** Inputs for {@link registerMonitorRoutes}. */
@@ -13,6 +13,8 @@ export interface MonitorOptions {
   root: string;
   /** Kill deps override (tests pass fakes; production wires `process.*`). */
   kill?: KillDeps;
+  /** Shared sampler (defaults to an isolated one — sites share it in production). */
+  sampler?: MonitorSampler;
 }
 
 /** Real uid of a pid via `/proc` (null when unreadable). */
@@ -60,7 +62,7 @@ function killStatus(verdict: KillVerdict): number {
  * Process kill is deliberately absent (deferred authz-designed wave).
  */
 export function registerMonitorRoutes(app: FastifyInstance, opts: MonitorOptions): void {
-  const sampler = createMonitorSampler();
+  const sampler = opts.sampler ?? createMonitorSampler();
   const killDeps = opts.kill ?? productionKillDeps();
 
   app.get('/api/monitor/summary', async () => sampleSummary(opts.env, opts.deps, sampler, opts.root));

@@ -29,6 +29,8 @@ export interface SiteStatus extends Site {
 
 /** Managed child process (never throws from `kill`). */
 export interface SiteProcess {
+  /** OS pid (`null` when unknown — fakes and pipe fallbacks). */
+  pid: number | null;
   kill(): void;
   onOutput(cb: (chunk: string) => void): void;
   onExit(cb: (code: number | null) => void): void;
@@ -88,6 +90,7 @@ export function realSpawner(): SiteSpawner {
       child.on('exit', (code) => exitCb(code));
       child.on('error', (err) => errorCb(err));
       return {
+        pid: child.pid ?? null,
         kill: () => {
           try {
             child.kill();
@@ -118,7 +121,18 @@ interface Running {
   proc: SiteProcess;
   logs: string[];
   started: number;
+  /** OS pid + engine version, both captured once at start (never per-list). */
+  pid: number | null;
+  engineVersion: string | null;
 }
+
+/** Fixed version commands per type (no user input — catalog-fixed strings only). */
+const VERSION_CMD: Record<SiteType, string> = {
+  node: 'node --version',
+  php: 'php --version',
+  static: 'python3 --version',
+  go: 'go version',
+};
 
 /** Shared live state (registry stays in the store; liveness lives here). */
 export interface SiteRuntime {
@@ -138,6 +152,10 @@ export interface SitesOptions {
   spawner: SiteSpawner;
   /** Shared liveness maps (defaults to an isolated runtime). */
   runtime?: SiteRuntime;
+  /** Targeted per-pid stats (absent → null rows; failures → null rows). */
+  procStats?: (pid: number) => Promise<{ cpuPercent: number | null; memBytes: number } | null>;
+  /** Fixed version command runner (absent → null versions). */
+  runVersion?: (command: string) => Promise<string | null>;
 }
 
 function strField(body: Record<string, unknown>, key: string): string {
@@ -204,7 +222,17 @@ export function registerSitesRoutes(app: FastifyInstance, opts: SitesOptions): v
     } else {
       proc = opts.spawner.spawn('go', ['run', '.'], { cwd: full, env: baseEnv });
     }
-    running.set(site.id, { proc, logs: [], started: Date.now() });
+    // One cheap version spawn at start (never per-list — pre-wave
+    // running sites keep null until restart, documented and honest).
+    let engineVersion: string | null = null;
+    if (opts.runVersion !== undefined) {
+      try {
+        engineVersion = await opts.runVersion(VERSION_CMD[site.type]);
+      } catch {
+        engineVersion = null;
+      }
+    }
+    running.set(site.id, { proc, logs: [], started: Date.now(), pid: proc.pid ?? null, engineVersion });
     deadLogs.delete(site.id);
     pushLog(site.id, `--- start (${site.type}) port ${site.port} ---\n`);
     proc.onOutput((chunk) => pushLog(site.id, chunk));
@@ -218,9 +246,38 @@ export function registerSitesRoutes(app: FastifyInstance, opts: SitesOptions): v
     });
   };
 
-  app.get('/api/sites', async () => ({
-    sites: opts.store.list().map((site) => ({ ...site, running: running.has(site.id) })),
-  }));
+  app.get('/api/sites', async () => {
+    // Per-pid stats in parallel (failures → null rows, never a failed
+    // listing; stopped sites skip probing entirely).
+    const stats = new Map<string, { cpuPercent: number | null; memBytes: number } | null>();
+    await Promise.all(
+      [...running.entries()].map(async ([id, rec]) => {
+        if (rec.pid === null || opts.procStats === undefined) {
+          stats.set(id, null);
+          return;
+        }
+        try {
+          stats.set(id, await opts.procStats(rec.pid));
+        } catch {
+          stats.set(id, null);
+        }
+      }),
+    );
+    return {
+      sites: opts.store.list().map((site) => {
+        const rec = running.get(site.id);
+        const st = rec === undefined ? null : (stats.get(site.id) ?? null);
+        return {
+          ...site,
+          running: rec !== undefined,
+          pid: rec?.pid ?? null,
+          cpuPercent: st?.cpuPercent ?? null,
+          memBytes: st?.memBytes ?? null,
+          engineVersion: rec?.engineVersion ?? null,
+        };
+      }),
+    };
+  });
 
   app.post('/api/sites', { bodyLimit: 1024 * 1024 }, async (req) => {
     const body = ((req.body ?? {}) as Record<string, unknown>);

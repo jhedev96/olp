@@ -32,6 +32,7 @@ interface SpawnCall {
 
 class FakeProc implements SiteProcess {
   killed = 0;
+  pid: number | null = null;
   private outputCb: (chunk: string) => void = () => {};
   private exitCb: (code: number | null) => void = () => {};
   private errorCb: (err: Error) => void = () => {};
@@ -65,7 +66,7 @@ class FakeProc implements SiteProcess {
   }
 }
 
-function makeSpawner(bins: Record<string, boolean> = {}): {
+function makeSpawner(bins: Record<string, boolean> = {}, pid: number | null = null): {
   spawner: SiteSpawner;
   procs: FakeProc[];
   calls: SpawnCall[];
@@ -76,6 +77,7 @@ function makeSpawner(bins: Record<string, boolean> = {}): {
     spawn: (cmd, args, opts) => {
       calls.push({ cmd, args, cwd: opts.cwd, env: opts.env });
       const proc = new FakeProc();
+      proc.pid = pid;
       procs.push(proc);
       return proc;
     },
@@ -383,5 +385,104 @@ describe('server sites routes', () => {
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: 'Website not found' });
     }
+  });
+
+  it('captures pid and version once, then serves stats with nulls', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawner, procs } = makeSpawner({}, 4242);
+    const store = memoryStore();
+    const versions: string[] = [];
+    const statsCalls: number[] = [];
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      siteStore: store,
+      siteSpawner: spawner,
+      siteProcStats: (pid) => {
+        statsCalls.push(pid);
+        return Promise.resolve({ cpuPercent: 3, memBytes: 42 });
+      },
+      siteRunVersion: (cmd) => {
+        versions.push(cmd);
+        return Promise.resolve('v24.1.0');
+      },
+    });
+    const cookie = await authedCookie(app);
+    writeFileSync(join(root, 'server.js'), 'x');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/sites',
+      headers: { cookie },
+      payload: { name: 'web', type: 'node', path: 'server.js', port: 3011 },
+    });
+    const id = created.json().site.id as string;
+    await app.inject({ method: 'POST', url: `/api/sites/${id}/start`, headers: { cookie } });
+    expect(versions).toEqual(['node --version']);
+    expect(procs).toHaveLength(1);
+
+    for (let i = 0; i < 3; i++) {
+      const list = await app.inject({ method: 'GET', url: '/api/sites', headers: { cookie } });
+      expect(list.json().sites[0]).toMatchObject({
+        running: true,
+        pid: 4242,
+        cpuPercent: 3,
+        memBytes: 42,
+        engineVersion: 'v24.1.0',
+      });
+    }
+    // Version captured once at start, never per list.
+    expect(versions).toEqual(['node --version']);
+    expect(statsCalls).toEqual([4242, 4242, 4242]);
+
+    procs[0]?.emitExit(0);
+    const dead = await app.inject({ method: 'GET', url: '/api/sites', headers: { cookie } });
+    expect(dead.json().sites[0]).toMatchObject({
+      running: false,
+      pid: null,
+      cpuPercent: null,
+      memBytes: null,
+      engineVersion: null,
+    });
+    // Stopped sites skip probing entirely.
+    expect(statsCalls).toEqual([4242, 4242, 4242]);
+  });
+
+  it('nulls failing version and stats probes without failing the listing', async () => {
+    const { dataDir, legacyDir, root } = freshWorkspace();
+    const { spawner } = makeSpawner({}, 99);
+    const store = memoryStore();
+    const { app } = buildServer({
+      dataDir,
+      legacyDir,
+      env: fakeEnv,
+      sysDeps: quietDeps(),
+      root,
+      siteStore: store,
+      siteSpawner: spawner,
+      siteProcStats: () => Promise.reject(new Error('no proc')),
+      siteRunVersion: () => Promise.reject(new Error('no bin')),
+    });
+    const cookie = await authedCookie(app);
+    writeFileSync(join(root, 'server.js'), 'x');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/sites',
+      headers: { cookie },
+      payload: { name: 'web', type: 'node', path: 'server.js', port: 3012 },
+    });
+    const id = created.json().site.id as string;
+    expect((await app.inject({ method: 'POST', url: `/api/sites/${id}/start`, headers: { cookie } })).statusCode).toBe(200);
+    const list = await app.inject({ method: 'GET', url: '/api/sites', headers: { cookie } });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().sites[0]).toMatchObject({
+      running: true,
+      pid: 99,
+      cpuPercent: null,
+      memBytes: null,
+      engineVersion: null,
+    });
   });
 });
