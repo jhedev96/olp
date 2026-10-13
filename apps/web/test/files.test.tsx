@@ -260,7 +260,7 @@ describe('web files page', () => {
     expect(screen.getByText('a.zip')).not.toBeNull();
     fireEvent.change(screen.getByLabelText('Search files'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Sort entries'), { target: { value: 'size' } });
-    expect(screen.getByText('CAND-019')).not.toBeNull();
+    expect(screen.getByText('Storage mounts')).not.toBeNull();
   });
 
   it('shows bulk size, refreshes and discards edits', async () => {
@@ -406,5 +406,47 @@ describe('web files page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Editor' }));
     });
     expect(document.querySelector('.cm-editor')).not.toBeNull();
+  });
+
+  it('shows modes, chmods through a dialog, and lists mounts', async () => {
+    const { calls } = stubApi((url, body) => {
+      if (url.startsWith('/api/files?path=')) {
+        return {
+          status: 200,
+          json: {
+            path: '',
+            entries: [
+              { name: 'docs', type: 'dir', size: 0, mtime: 0, mode: '0755' },
+              { name: 'a.txt', type: 'file', size: 11, mtime: 0, mode: '0644' },
+            ],
+          },
+        };
+      }
+      if (url === '/api/mounts') {
+        return { status: 200, json: { mounts: [{ path: '/r', present: true, dir: true }, { path: '/nope', present: false, dir: false }] } };
+      }
+      if (url === '/api/chmod') return { status: 200, json: { ok: true } };
+      return filesHandler(url, body);
+    });
+    await act(async () => {
+      render(<FilesPage />);
+    });
+    expect(screen.getByText('0755')).not.toBeNull();
+    expect(screen.getByText('0644')).not.toBeNull();
+    expect(screen.getByText('/r')).not.toBeNull();
+    expect(screen.getByText('present')).not.toBeNull();
+    expect(screen.getByText('absent')).not.toBeNull();
+    expect(screen.queryByText('Storage mounts & shortcuts')).toBeNull();
+    const row = (screen.getByText('0644').closest('tr') as HTMLElement) ?? document.body;
+    await act(async () => {
+      fireEvent.click(within(row).getByText('Chmod'));
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('a.txt');
+    fireEvent.change(within(dialog).getByPlaceholderText('0644'), { target: { value: '0600' } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Chmod' }));
+    });
+    expect(calls.find((c) => c.url === '/api/chmod')?.body).toEqual({ path: '', name: 'a.txt', mode: '0600' });
   });
 });

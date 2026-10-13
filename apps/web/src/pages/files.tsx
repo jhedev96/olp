@@ -20,7 +20,8 @@ import { formatCode, unsupportedReason } from '../lib/format-code.js';
 import { diffLines } from '../lib/line-diff.js';
 import type { EditorView } from '@codemirror/view';
 import { ConfirmDialog, PromptDialog } from '../components/common/Dialog.js';
-import { ComingSoon, EmptyState } from '../components/common/States.js';
+import { EmptyState } from '../components/common/States.js';
+import { Badge } from '../components/common/Badge.js';
 import { CodeEditor } from '../components/code/CodeEditor.js';
 import { CodePreview } from '../components/code/CodePreview.js';
 import { languageFor } from '../components/code/languages.js';
@@ -45,6 +46,14 @@ export interface FileEntry {
   type: 'dir' | 'file';
   size: number;
   mtime: number;
+  mode?: string | null;
+}
+
+/** `/api/mounts` row shape (server contract). */
+export interface MountRow {
+  path: string;
+  present: boolean;
+  dir: boolean;
 }
 
 /** One open editor tab (client-side only — no backend). */
@@ -112,6 +121,8 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [promptRename, setPromptRename] = useState<string | null>(null);
   const [promptTouch, setPromptTouch] = useState(false);
+  const [promptChmod, setPromptChmod] = useState<{ name: string; mode: string } | null>(null);
+  const [mounts, setMounts] = useState<MountRow[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('name');
@@ -149,10 +160,34 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
       .catch(() => {
         // root card keeps its placeholder without disk numbers
       });
+    void apiJson<{ mounts?: MountRow[] }>('/api/mounts')
+      .then((body) => {
+        if (alive && Array.isArray(body.mounts)) setMounts(body.mounts);
+      })
+      .catch(() => {
+        // mounts card keeps its placeholder
+      });
     return () => {
       alive = false;
     };
   }, []);
+
+  const confirmChmod = async (mode: string): Promise<void> => {
+    if (promptChmod === null) return;
+    const name = promptChmod.name;
+    setPromptChmod(null);
+    setError('');
+    try {
+      await apiJson('/api/chmod', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dir, name, mode: mode.trim() }),
+      });
+      await load(dir);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to chmod');
+    }
+  };
 
   useEffect(() => {
     createIcons({ icons: ICONS });
@@ -531,7 +566,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
           <tbody>
             {dir !== '' && (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <button type="button" onClick={up}>
                     <Icon name="arrow-up" label="Up" /> ..
                   </button>
@@ -545,6 +580,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
               <td>Name</td>
               <td>Size</td>
               <td>Modified</td>
+              <td>Mode</td>
               <td>Actions</td>
             </tr>
             {visible.map((entry) => (
@@ -574,6 +610,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
                 </td>
                 <td className="text-neutral-400">{entry.type === 'dir' ? '—' : fmtSize(entry.size)}</td>
                 <td className="text-neutral-400">{fmtDate(entry.mtime)}</td>
+                <td className="font-mono text-xs text-neutral-400">{entry.mode ?? '—'}</td>
                 <td>
                   <div className="flex gap-1">
                     {entry.type === 'file' && (
@@ -613,6 +650,13 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
                     <button type="button" className="text-xs" onClick={() => rename(entry.name)}>
                       <Icon name="pencil-line" label="Rename" /> Rename
                     </button>
+                    <button
+                      type="button"
+                      className="text-xs"
+                      onClick={() => setPromptChmod({ name: entry.name, mode: entry.mode ?? '0644' })}
+                    >
+                      <Icon name="pencil-line" label="Chmod" /> Chmod
+                    </button>
                     <button type="button" className="text-xs text-red-400" onClick={() => remove(entry.name)}>
                       <Icon name="trash-2" label="Delete" /> Delete
                     </button>
@@ -622,7 +666,7 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-neutral-400">
+                <td colSpan={6} className="text-neutral-400">
                   <EmptyState
                     title={entries.length === 0 ? 'Empty folder' : 'No matches'}
                     hint={entries.length === 0 ? undefined : 'Try another search.'}
@@ -778,7 +822,22 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
       )}
       </div>
       <div className="mt-3">
-        <ComingSoon feature="Storage mounts & shortcuts" candidate="CAND-019" />
+        <Card>
+          <h2 className="mb-2 font-bold">Storage mounts</h2>
+          {mounts.length === 0 ? (
+            <p className="text-sm text-neutral-400">No mount data — the probe has not answered yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {mounts.map((mount) => (
+                <li key={mount.path} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="mr-auto font-mono text-xs">{mount.path}</span>
+                  <Badge tone={mount.present ? 'success' : 'neutral'}>{mount.present ? (mount.dir ? 'present' : 'file') : 'absent'}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1 text-xs text-neutral-500">Presence reflects filesystem visibility only (no permission queries).</p>
+        </Card>
       </div>
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -814,6 +873,15 @@ export function FilesPage({ editorViewRef }: { editorViewRef?: (view: EditorView
         confirmLabel="Create"
         onSubmit={confirmTouch}
         onCancel={() => setPromptTouch(false)}
+      />
+      <PromptDialog
+        open={promptChmod !== null}
+        title={promptChmod === null ? 'Change mode' : `Change mode of ${promptChmod.name}`}
+        initialValue={promptChmod?.mode ?? '0644'}
+        placeholder="0644"
+        confirmLabel="Chmod"
+        onSubmit={(mode) => void confirmChmod(mode)}
+        onCancel={() => setPromptChmod(null)}
       />
     </main>
   );

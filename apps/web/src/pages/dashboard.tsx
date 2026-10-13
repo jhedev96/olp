@@ -4,7 +4,6 @@ import { ApiError, apiJson } from '../lib/api.js';
 import { fmtDate, fmtSize, fmtUptime } from '../lib/format.js';
 import { navigateTo } from '../lib/router.js';
 import { Badge } from '../components/common/Badge.js';
-import { ComingSoon } from '../components/common/States.js';
 import { ConfirmDialog } from '../components/common/Dialog.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
@@ -43,6 +42,13 @@ export interface DashStoreItem {
   id: string;
   name: string;
   installed: boolean;
+}
+
+/** `/api/logs` line shape (server contract). */
+export interface LogLineRow {
+  t: number;
+  level: 'info' | 'warn' | 'error';
+  msg: string;
 }
 
 /** Dashboard poll cadence (Terwo 5 s parity). */
@@ -87,6 +93,7 @@ export function DashboardPage(): ReactElement {
   const [siteFilter, setSiteFilter] = useState('all');
   const [telegramOn, setTelegramOn] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [logs, setLogs] = useState<LogLineRow[]>([]);
   const [restarting, setRestarting] = useState(false);
   const [restartMsg, setRestartMsg] = useState('');
   const restartTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -162,6 +169,19 @@ export function DashboardPage(): ReactElement {
   useEffect(() => {
     void loadDaemons();
   }, [loadDaemons]);
+
+  const loadLogs = useCallback(async (): Promise<void> => {
+    try {
+      const body = await apiJson<{ logs?: LogLineRow[] }>('/api/logs?tail=50');
+      if (Array.isArray(body.logs)) setLogs(body.logs);
+    } catch {
+      // log card keeps the previous render on failure
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs]);
 
   const startDaemon = async (id: string): Promise<void> => {
     setDaemonError('');
@@ -355,7 +375,34 @@ export function DashboardPage(): ReactElement {
               ))}
             </ul>
           </Card>
-          <ComingSoon feature="Panel log tail" candidate="CAND-013" />
+          <Card>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <h2 className="mr-auto font-bold">Panel log</h2>
+              <Button size="sm" variant="outline" onClick={() => void loadLogs()}>
+                Refresh
+              </Button>
+            </div>
+            {logs.length === 0 ? (
+              <p className="text-sm text-neutral-400">No log lines yet.</p>
+            ) : (
+              <ul className="flex max-h-64 flex-col gap-1 overflow-auto">
+                {logs.map((line, i) => (
+                  <li
+                    key={`${line.t}-${i}`}
+                    className={
+                      line.level === 'error'
+                        ? 'font-mono text-xs text-red-400'
+                        : line.level === 'warn'
+                          ? 'font-mono text-xs text-amber-300'
+                          : 'font-mono text-xs text-neutral-400'
+                    }
+                  >
+                    {line.msg}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
           {telegramOn && (
             <Card>
               <h2 className="font-bold">Telegram alerts on</h2>
