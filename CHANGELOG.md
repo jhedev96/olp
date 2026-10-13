@@ -80,6 +80,14 @@ Termux/Alpine/macOS hardware.
   pid/version/stats list fields + cards + dashboard RAM sum +
   restart wiring. Unit/integration green; behavioral proof is a
   HUMAN GATE (TODOS phase 24).
+- Full-system bundle wave 16 [UNTESTED live — merged 2026-10-13 on
+  human decision, box inadequate for live servers]: manifest + parts
+  snapshot job (enumerate/dump/stage/manifest, single-flight) +
+  danger-guarded restore-all (reset + pipe-in, configs shape-guard,
+  missing-only crons, failed-if-any) + bundle card with DB checklist
+  dialog and live step polls. Unit/integration green (server 196,
+  web 174); behavioral proof is a HUMAN GATE (TODOS phase 26).
+  Auth `config.json` stays excluded (CAND-038).
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).

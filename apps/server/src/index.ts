@@ -25,7 +25,8 @@ import { fileRegistry, mysqlDriver, normalizeConfig, pgDriver, registerDatabaseR
 import type { DbConfig, DbDriver, DbEngine, DbRegistry } from './database.js';
 import { nodeBackupSys, registerBackupRoutes, startBackupScheduler } from './backup.js';
 import type { BackupSystem } from './backup.js';
-import { nodeCronBackend, registerCronRoutes } from './cron.js';
+import { nodeCronBackend, parseCronLine, registerCronRoutes } from './cron.js';
+import type { CronJob } from './cron.js';
 import type { CronBackend } from './cron.js';
 import { registerServicesRoutes } from './services.js';
 import type { ServicesControllerOf } from './services.js';
@@ -164,24 +165,52 @@ export function buildServer(opts: ServerOptions = {}): ServerHandle {
     sys: opts.proxySys ?? nodeProxySys(),
   });
   const dbRegistry = opts.dbRegistry ?? fileRegistry(auth.dataDir);
+  const dbDrivers = opts.dbDrivers ?? { mysql: mysqlDriver(), postgres: pgDriver() };
   registerDatabaseRoutes(app, {
     registry: dbRegistry,
-    drivers: opts.dbDrivers ?? { mysql: mysqlDriver(), postgres: pgDriver() },
+    drivers: dbDrivers,
   });
+  const bundleDbConfig =
+    opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>));
+  const cronBackend = opts.cronBackend ?? nodeCronBackend();
   registerBackupRoutes(app, {
     dataDir: auth.dataDir,
     root,
     sys: opts.backupSys ?? nodeBackupSys(),
-    dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
+    dbConfig: bundleDbConfig,
+    bundle: {
+      listDatabases: async (engine) => {
+        try {
+          const conn = await dbDrivers[engine].connect(bundleDbConfig(engine));
+          try {
+            return await dbDrivers[engine].listDatabases(conn);
+          } finally {
+            await dbDrivers[engine].close(conn).catch(() => '');
+          }
+        } catch {
+          return [];
+        }
+      },
+      readCronJobs: async () => {
+        const jobs: CronJob[] = [];
+        for (const line of await cronBackend.readLines()) {
+          const job = parseCronLine(line);
+          if (job !== null) jobs.push(job);
+        }
+        return jobs;
+      },
+      readCronLines: () => cronBackend.readLines(),
+      writeCronLines: (lines) => cronBackend.writeLines(lines),
+    },
   });
   startBackupScheduler({
     sys: opts.backupSys ?? nodeBackupSys(),
     dataDir: auth.dataDir,
     root,
-    dbConfig: opts.backupDbConfig ?? ((engine) => normalizeConfig(engine, (dbRegistry.load()[engine] ?? {}) as Record<string, unknown>)),
+    dbConfig: bundleDbConfig,
     now: () => Date.now(),
   });
-  registerCronRoutes(app, { backend: opts.cronBackend ?? nodeCronBackend(), runsPath: join(dataDir, 'cron-runs.json') });
+  registerCronRoutes(app, { backend: cronBackend, runsPath: join(dataDir, 'cron-runs.json') });
   const settingsStore = opts.settingsStore ?? fileSettingsStore(auth.dataDir);
   // Bind report holder (resolved here so boot and routes share one
   // source of truth; listen mutates effective/fallback in W13-03).

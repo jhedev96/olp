@@ -229,10 +229,11 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 
 ## Phase 26 — Full-system bundle wave 16 (manifest + jobs; spec approved 2026-10-13)
 
-- [~] W16-00 planning: spec + tasks + todos (`SPECS/spec-bundle-wave.md`, `TASKS/phase-26-bundle-wave.md`)
-- [ ] W16-01 discovery surfaces + tests
-- [ ] W16-02 snapshot job + tests
-- [ ] W16-03 restore-all + tests
-- [ ] W16-04 smoke extension + live ALL GREEN
-- [ ] W16-05 frontend wiring
-- [ ] W16-06 docs + CAND-035 close + CAND-038 open
+- [x] W16-00 planning: spec + tasks + todos (`SPECS/spec-bundle-wave.md`, `TASKS/phase-26-bundle-wave.md`)
+- [x] W16-01 discovery surfaces + tests
+- [x] W16-02 snapshot job + tests
+- [x] W16-03 restore-all + tests
+- [ ] W16-04 smoke extension (code committed; LIVE UNTESTED — merged 2026-10-13 on human decision)
+- [x] W16-05 frontend wiring
+- [x] W16-06 docs (CAND-035 merged UNTESTED, CAND-038 opened, human gate below)
+- [ ] HUMAN GATE: bundle live proof (snapshot configs/crons → parts verify → restore-all done → cleanup; record PASS/FAIL here)
