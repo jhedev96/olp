@@ -139,6 +139,54 @@ export function cronJobLine(job: Pick<CronJob, 'schedule' | 'command' | 'id' | '
   return `${job.schedule} ${job.command} # panel:${job.id}:${job.name.replace(/[\r\n#]/g, ' ')}`;
 }
 
+/** Match key for restore-all missing-job detection (name + schedule + command). */
+export function sameCronJob(
+  a: Pick<CronJob, 'name' | 'schedule' | 'command'>,
+  b: Pick<CronJob, 'name' | 'schedule' | 'command'>,
+): boolean {
+  return a.name === b.name && a.schedule === b.schedule && a.command === b.command;
+}
+
+/**
+ * Wanted jobs absent from `existing` (match on name + schedule +
+ * command; ids differ across panels so they are ignored).
+ */
+export function findMissingCronJobs(existing: CronJob[], wanted: CronJob[]): CronJob[] {
+  return wanted.filter((w) => !existing.some((e) => sameCronJob(e, w)));
+}
+
+/**
+ * Shape-validate a crons export part (unknown JSON) into panel jobs.
+ * Throws `Error('Invalid cron export')` on any bad shape so restore
+ * never writes from corrupt backups.
+ */
+export function parseCronExport(value: unknown): CronJob[] {
+  if (!Array.isArray(value)) throw new Error('Invalid cron export');
+  return value.map((entry) => {
+    if (typeof entry !== 'object' || entry === null) throw new Error('Invalid cron export');
+    const row = entry as Record<string, unknown>;
+    const id = row['id'];
+    const name = row['name'];
+    const schedule = row['schedule'];
+    const command = row['command'];
+    const enabled = row['enabled'];
+    if (
+      typeof id !== 'string' ||
+      id === '' ||
+      typeof name !== 'string' ||
+      name === '' ||
+      typeof schedule !== 'string' ||
+      schedule === '' ||
+      typeof command !== 'string' ||
+      command === '' ||
+      typeof enabled !== 'boolean'
+    ) {
+      throw new Error('Invalid cron export');
+    }
+    return { id, name, schedule, command, enabled };
+  });
+}
+
 /**
  * Toggle one line when it is tagged with `id`; every other line returns
  * byte-identical (pure helper, Terwo `apiCronToggle` mapping parity).

@@ -7,7 +7,7 @@ import type { SysDeps } from '@olp/sysinfo';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
-import { normalizeConfig, quotePgIdent, safeCell, validDbName } from '../src/database.js';
+import { filterUserDatabases, isSystemDatabase, normalizeConfig, quotePgIdent, safeCell, validDbName } from '../src/database.js';
 import type { DbConfig, DbConn, DbDriver, DbEngine, DbRegistry, DbResult } from '../src/database.js';
 
 const KNOWN_PASSWORD = 'dbpass123';
@@ -208,6 +208,18 @@ describe('database pure helpers', () => {
     expect(validDbName('semi;colon')).toBe(false);
     expect(validDbName('x'.repeat(64))).toBe(true);
     expect(validDbName('x'.repeat(65))).toBe(false);
+  });
+
+  it('excludes system databases per engine for bundle enumeration', () => {
+    expect(filterUserDatabases('mysql', ['information_schema', 'mysql', 'performance_schema', 'sys', 'appdb', 'blog'])).toEqual([
+      'appdb',
+      'blog',
+    ]);
+    expect(filterUserDatabases('postgres', ['postgres', 'template0', 'template1', 'appdb'])).toEqual(['appdb']);
+    expect(filterUserDatabases('mysql', [])).toEqual([]);
+    expect(filterUserDatabases('postgres', ['postgres', 'template0', 'template1'])).toEqual([]);
+    expect(isSystemDatabase('mysql', 'Mysql')).toBe(false);
+    expect(isSystemDatabase('postgres', 'Postgres')).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { buildServer } from '../src/index.js';
 import { nodeCronBackend } from '../src/cron.js';
-import { cronJobLine, parseCronLine, toggleCronLine } from '../src/cron.js';
+import { cronJobLine, findMissingCronJobs, parseCronExport, parseCronLine, sameCronJob, toggleCronLine } from '../src/cron.js';
 import type { CronBackend } from '../src/cron.js';
 
 const KNOWN_PASSWORD = 'cronpass12';
@@ -128,6 +128,25 @@ describe('cron codec', () => {
     expect(toggleCronLine(`#${line}`, 'ab12')).toBe(line);
     expect(toggleCronLine(line, 'other')).toBe(line);
     expect(toggleCronLine('MAILTO=x', 'ab12')).toBe('MAILTO=x');
+  });
+
+  it('matches cron jobs ignoring ids for restore-all', () => {
+    const a = { id: 'aa11', name: 'nightly', schedule: '0 2 * * *', command: '/bin/sync', enabled: true };
+    const sameId = { ...a, id: 'bb22', enabled: false };
+    const other = { ...a, id: 'cc33', command: '/bin/other' };
+    expect(sameCronJob(a, sameId)).toBe(true);
+    expect(sameCronJob(a, other)).toBe(false);
+    expect(findMissingCronJobs([a], [sameId, other])).toEqual([other]);
+    expect(findMissingCronJobs([a], [sameId])).toEqual([]);
+  });
+
+  it('validates cron exports before restore writes', () => {
+    const good = [{ id: 'ab12', name: 'nightly', schedule: '0 2 * * *', command: '/bin/sync', enabled: true }];
+    expect(parseCronExport(good)).toEqual(good);
+    expect(parseCronExport([])).toEqual([]);
+    for (const bad of [{}, null, 'x', [null], [{ ...good[0], enabled: 'yes' }], [{ ...good[0], command: '' }]]) {
+      expect(() => parseCronExport(bad)).toThrow('Invalid cron export');
+    }
   });
 });
 

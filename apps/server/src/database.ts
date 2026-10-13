@@ -402,6 +402,26 @@ export function validDbName(name: string): boolean {
   return /^[A-Za-z0-9_$]+$/.test(name) && name.length <= 64;
 }
 
+/**
+ * System databases excluded from full-system bundle enumeration
+ * (spec-bundle-wave §2; exact case-sensitive match so user DBs
+ * like `Mysql` are never hidden).
+ */
+const SYSTEM_DATABASES: Record<DbEngine, ReadonlySet<string>> = {
+  mysql: new Set(['information_schema', 'mysql', 'performance_schema', 'sys']),
+  postgres: new Set(['postgres', 'template0', 'template1']),
+};
+
+/** True when `name` is a system database for `engine`. */
+export function isSystemDatabase(engine: DbEngine, name: string): boolean {
+  return SYSTEM_DATABASES[engine].has(name);
+}
+
+/** Drop system databases, preserving order (bundle enumerate step). */
+export function filterUserDatabases(engine: DbEngine, names: string[]): string[] {
+  return names.filter((name) => !isSystemDatabase(engine, name));
+}
+
 /** Map CREATE DATABASE driver errors to HTTP shapes. */
 function createStatus(message: string): number {
   if (/database exists|already exists|42P04|\b1007\b/i.test(message)) return 409;
