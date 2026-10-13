@@ -222,6 +222,7 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W15-00 planning: spec + tasks + todos (`SPECS/spec-mirror-wave.md`, `TASKS/phase-25-mirror-wave.md`)
 - [x] W15-01 pkgman descriptors + parsers + purge map + tests
 - [x] W15-02 server per-env mirror + purge slot + tests
-- [x] W15-03 smoke extension (written; live run deferred)
+- [x] W15-03 smoke extension (code committed; LIVE UNTESTED — merged 2026-10-13 on human decision)
 - [x] W15-04 frontend purge button + tests
-- [x] W15-05 docs + CAND-036 close-pending-live
+- [x] W15-05 docs (CAND-036 merged UNTESTED, human gate below)
+- [ ] HUMAN GATE: mirror + purge live proof (per-env mirror shape + purge lifecycle; record PASS/FAIL here)

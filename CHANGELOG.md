@@ -75,11 +75,12 @@ Termux/Alpine/macOS hardware.
   validation + save/restart endpoints + localhost fallback +
   supervisor-aware restart with login redirect; settings editor
   wired; smoke save/restart-exit ALL GREEN (75 live).
-- Per-env mirror + purge wave 15 (code complete, live gate
-  PENDING with wave 14 — box OOM): native mirror files per OS
-  (apt incl. DEB822, pacman, apk, yum baseurl-only, brew remote
-  attempt) + purge-cache ops slot with confirm dialog; page
-  wired.
+- Per-env mirror + purge wave 15 [UNTESTED live — merged 2026-10-13
+  on human decision, box inadequate for live servers]: native mirror
+  files per OS (apt incl. DEB822, pacman, apk, yum baseurl-only,
+  brew remote attempt) + purge-cache ops slot with confirm dialog;
+  page wired. Unit/integration green; behavioral proof is a HUMAN
+  GATE (TODOS phase 25).
 
 - Fastify API server (auth, files, terminal WS, sites, proxy, database,
   store, cron, backup, settings, telegram, watchdog, static SPA hosting).
