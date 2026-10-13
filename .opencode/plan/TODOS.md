@@ -213,6 +213,7 @@ Deferred to web scope: static pages (`/login`, `/app.html`, vendor assets)
 - [x] W14-00 planning: spec + tasks + todos (`SPECS/spec-sitestats-wave.md`, `TASKS/phase-24-sitestats-wave.md`)
 - [x] W14-01 sysinfo samplePid + unit tests
 - [x] W14-02 sites pid/version/stats + sampler share + tests
-- [ ] W14-03 smoke extension + live ALL GREEN
+- [ ] W14-03 smoke extension (code committed; LIVE UNTESTED — merged 2026-10-13 on human decision)
 - [x] W14-04 frontend cards + dashboard sum + tests
-- [x] W14-05 docs written (CAND-015 close PENDING live-smoke green — box OOM, 5 boots SIGKILLed)
+- [x] W14-05 docs (CAND-015 merged UNTESTED, human gate below)
+- [ ] HUMAN GATE: site-stats live proof (node start → pid/version/RSS live → stop → nulls; record PASS/FAIL here)
